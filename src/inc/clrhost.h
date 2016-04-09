@@ -81,6 +81,11 @@ void ClrFlsAssociateCallback(DWORD slot, PTLS_CALLBACK_FUNCTION callback);
 
 typedef LPVOID* (*CLRFLSGETBLOCK)();
 extern CLRFLSGETBLOCK __ClrFlsGetBlock;
+// Hack
+#ifndef _ASSERTE
+#define _ASSERTE(x) if (!(x)) {throw 0;}
+#endif
+
 
 // Combining getter/setter into a single call
 inline void ClrFlsIncrementValue(DWORD slot, int increment)
