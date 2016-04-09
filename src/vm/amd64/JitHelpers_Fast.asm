@@ -453,9 +453,6 @@ LEAF_ENTRY JIT_PatchedCodeStart, _TEXT
 LEAF_END JIT_PatchedCodeStart, _TEXT
 
 
-;// Hack LOOK HERE FOR WRITE BARRIER.
-
-
 ; This is used by the mechanism to hold either the JIT_WriteBarrier_PreGrow 
 ; or JIT_WriteBarrier_PostGrow code (depending on the state of the GC). It _WILL_
 ; change at runtime as the GC changes. Initially it should simply be a copy of the 

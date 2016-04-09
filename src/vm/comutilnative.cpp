@@ -28,8 +28,6 @@
 #include "field.h"
 #include "winwrap.h"
 #include "gc.h"
-// Hack
-#include "../gc\Arena.h"
 #include "fcall.h"
 #include "invokeutil.h"
 #include "eeconfig.h"
@@ -1995,14 +1993,12 @@ FORCEINLINE UINT64 GCInterface::InterlockedSub(UINT64 *pMinuend, UINT64 subtrahe
 
 void QCALLTYPE GCInterface::_AddMemoryPressure(UINT64 bytesAllocated) 
 {
-	// Hack- overloading an exiting API for a completely new purpose
-	::ArenaControl::SetAllocator((int)bytesAllocated);
-    //QCALL_CONTRACT;
+    QCALL_CONTRACT;
 
-    //// AddMemoryPressure could cause a GC, so we need a frame 
-    //BEGIN_QCALL;
-    //AddMemoryPressure(bytesAllocated);
-    //END_QCALL;
+    // AddMemoryPressure could cause a GC, so we need a frame 
+    BEGIN_QCALL;
+    AddMemoryPressure(bytesAllocated);
+    END_QCALL;
 }
 
 void GCInterface::AddMemoryPressure(UINT64 bytesAllocated)
