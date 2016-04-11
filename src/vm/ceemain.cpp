@@ -131,6 +131,8 @@
 //     boxing this describes this feature.
 
 #include "common.h"
+// Hack
+#include "arena.h"
 
 #include "vars.hpp"
 #include "log.h"
@@ -1239,7 +1241,7 @@ void EEStartupHelper(COINITIEE fFlags)
 #endif
 
         InitializeGarbageCollector();
-
+		ArenaControl::InitArena();
         InitializePinHandleTable();
 
 #ifdef DEBUGGING_SUPPORTED

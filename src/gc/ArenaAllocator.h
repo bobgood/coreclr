@@ -121,8 +121,7 @@ namespace sfl
 
 	// ArenaAllocator
 	template <typename ConcurrencyPolicy = policy::ThreadSafe,
-		typename AllocationPolicy = policy::RefcountValidation<ConcurrencyPolicy>,
-		typename OverflowAllocator = HeapAllocator>
+		typename AllocationPolicy = policy::RefcountValidation<ConcurrencyPolicy>>
 	class ArenaAllocator
 		: public AllocationPolicy
 
@@ -137,21 +136,31 @@ namespace sfl
 			Config(uint32_t minBuffer = 64 * 1024)
 				: minBuffer(minBuffer),
 				maxBuffer(minBuffer << 5),
-				maxArenaAlloc(minBuffer / 2)
+				maxArenaAlloc(minBuffer / 2),
+				addr(0)
 			{}
 
 
 			Config(uint32_t minBuffer, uint32_t maxBuffer)
 				: minBuffer(minBuffer),
 				maxBuffer(maxBuffer),
-				maxArenaAlloc(minBuffer / 2)
+				maxArenaAlloc(minBuffer / 2),
+				addr(0)
 			{}
 
 
-			Config(uint32_t minBuffer, uint32_t maxBuffer, uint32_t maxArenaAlloc)
+			Config(uint32_t minBuffer, uint32_t maxBuffer, uint64_t iaddr)
 				: minBuffer(minBuffer),
 				maxBuffer(maxBuffer),
-				maxArenaAlloc(maxArenaAlloc)
+				maxArenaAlloc(minBuffer / 2),
+				addr(iaddr)
+			{}
+
+			Config(uint32_t minBuffer, uint32_t maxBuffer, uint64_t iaddr, uint32_t maxArenaAlloc)
+				: minBuffer(minBuffer),
+				maxBuffer(maxBuffer),
+				maxArenaAlloc(maxArenaAlloc),
+				addr(iaddr)
 			{}
 
 
@@ -160,6 +169,9 @@ namespace sfl
 
 			// Maximum amount of memory to be used for arena buffer
 			uint32_t maxBuffer;
+
+			// If non-zero, a VirtualAlloc is used for the buffers at a location starting at Addr
+			uint64_t addr;
 
 			// Maximum size of allocation that will be satisfied from arena.
 			// Requests larger than this threshold will be sent to overflow allocator.
@@ -172,7 +184,8 @@ namespace sfl
 
 		// c/dtor
 		ArenaAllocator(const Config& config = Config())
-			: m_config(config)
+			: m_config(config),
+			m_virtualAddress(config.addr)
 		{
 			// Calculate maximum number of exponentially increasing arena buffers
 			// we can allocate and still stay within specified max buffer limit.
@@ -329,19 +342,61 @@ namespace sfl
 			}
 		}
 
-
 		// Allocate using the overflow allocator
 		void* AllocateOverflow(size_t size)
 		{
-			void* p = m_overflowAllocator.Allocate(size);
+
+			void* p = AllocateBuffer(size);
 
 			std::lock_guard<typename ConcurrencyPolicy::Lock> guard(m_overflowBuffersLock);
 
 			m_overflowBuffers.push_back(p);
+			m_overflowBufferLengths.push_back(size);
 
 			return p;
 		}
 
+		LPVOID AllocateBuffer(size_t size)
+		{
+			if (m_virtualAddress > 0)
+			{
+				size_t requestAddress;
+				for (;;)
+				{
+					requestAddress = m_virtualAddress;
+					auto nextAddress = requestAddress + size;
+					if (ConcurrencyPolicy::CompareExchange(m_virtualAddress, nextAddress, requestAddress))
+					{
+						break;
+					}
+				}
+
+				LPVOID addr = ClrVirtualAlloc((LPVOID)requestAddress, size, MEM_COMMIT, PAGE_READWRITE);		
+				if ((size_t)addr != requestAddress)
+				{
+					throw "ClrVirtualAlloc memory collision";
+				}
+
+				return addr;
+			}
+			else
+			{
+				// Increase the size of the arena buffers exponentially  
+				return operator new(size);
+			}
+		}
+
+		void DeallocateBuffer(LPVOID addr, size_t size)
+		{
+			if (m_virtualAddress > 0)
+			{
+				ClrVirtualFree(addr, size, MEM_RELEASE);
+			}
+			else
+			{
+				delete addr;
+			}
+		}
 
 		// Add a new arena buffer
 		void AddBuffer()
@@ -355,8 +410,7 @@ namespace sfl
 			nextBlock.bufferIndex = static_cast<uint32_t>(m_arenaBuffers.size());
 			nextBlock.bufferOffset = initialOffset;
 
-			// Increase the size of the arena buffers exponentially  
-			m_arenaBuffers.push_back(operator new(m_config.minBuffer << nextBlock.bufferIndex));
+			m_arenaBuffers.push_back(AllocateBuffer(m_config.minBuffer << nextBlock.bufferIndex));
 
 			// The fast path assumes that arena buffer pointed to by m_nextBlock is
 			// already present in m_arenaBuffers vector. MemoryBarrier makes sure
@@ -377,9 +431,9 @@ namespace sfl
 			// Free arena buffers
 			assert(!m_arenaBuffers.empty());
 			for (size_t i = bufferToKeep; i < m_arenaBuffers.size(); i++)
-
 			{
-				delete (Arena*)m_arenaBuffers[i];
+				size_t size = m_config.minBuffer << i;
+				DeallocateBuffer(m_arenaBuffers[i], size);
 			}
 
 			m_arenaBuffers.resize(bufferToKeep);
@@ -388,10 +442,11 @@ namespace sfl
 
 			for (size_t i = bufferToKeep; i < m_overflowBuffers.size(); i++)
 			{
-				m_overflowAllocator.Deallocate(m_overflowBuffers[i]);
+				DeallocateBuffer(m_overflowBuffers[i], m_overflowBufferLengths[i]);
 			}
 
 			m_overflowBuffers.resize(0);
+			m_overflowBufferLengths.resize(0);
 			m_overflowAllocator.Reset();
 		}
 
@@ -441,12 +496,16 @@ namespace sfl
 		vector<void*>                  m_arenaBuffers;
 		typename ConcurrencyPolicy::Lock    m_arenaBuffersLock;
 
-		// List of overflow buffers and lock for updates
+		// List of overflow buffers
 		vector<void*>                  m_overflowBuffers;
+
+		// List of overflow bufferlengths
+		vector<size_t>                  m_overflowBufferLengths;
+
+		// Lock for overflow buffer list
 		typename ConcurrencyPolicy::Lock    m_overflowBuffersLock;
 
-		// Overflow allocator
-		OverflowAllocator                   m_overflowAllocator;
+		volatile size_t m_virtualAddress;
 	};
 
 

@@ -1,5 +1,5 @@
 #pragma once
-// Hack
+// Hack fixed sized vector, should be replaced with a real vector so that overflow buffers can work at scale
 namespace sfl
 {
 	template<class T>
