@@ -348,7 +348,7 @@ namespace sfl
 
 			void* p = AllocateBuffer(size);
 
-			std::lock_guard<typename ConcurrencyPolicy::Lock> guard(m_overflowBuffersLock);
+			std::lock_guard<typename ConcurrencyPolicy::Lock> guard(m_arenaBuffersLock);
 
 			m_overflowBuffers.push_back(p);
 			m_overflowBufferLengths.push_back(size);
@@ -447,7 +447,6 @@ namespace sfl
 
 			m_overflowBuffers.resize(0);
 			m_overflowBufferLengths.resize(0);
-			m_overflowAllocator.Reset();
 		}
 
 
@@ -502,8 +501,6 @@ namespace sfl
 		// List of overflow bufferlengths
 		vector<size_t>                  m_overflowBufferLengths;
 
-		// Lock for overflow buffer list
-		typename ConcurrencyPolicy::Lock    m_overflowBuffersLock;
 
 		volatile size_t m_virtualAddress;
 	};

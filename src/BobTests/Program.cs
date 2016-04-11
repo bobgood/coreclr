@@ -19,6 +19,7 @@ namespace BobTests
 
             AllocReset();
             AllocPushNew();
+            AllocPop();
          //   var n = new Test();
             //var t=GC.GetTotalMemory(false);
             ////System.Threading.Tasks.TaskTimeoutExtensions();

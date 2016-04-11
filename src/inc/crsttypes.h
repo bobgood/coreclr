@@ -183,7 +183,9 @@ enum CrstType
     CrstVSDIndirectionCellLock = 166,
     CrstWinRTFactoryCache = 167,
     CrstWrapperTemplate = 168,
-    kNumberOfCrstTypes = 169
+		// Hack
+	CrstArenaAllocator=169,
+    kNumberOfCrstTypes = 170
 };
 
 #endif // __CRST_TYPES_INCLUDED

@@ -29,18 +29,7 @@ inline void LockUsageExamples()
 #endif // USAGE_EXAMPLES
 #define _ASSERTE(x) if(!(x)) {throw "BobAssert";}
 #include "clrhost.h"
-// #include <boost/noncopyable.hpp>
 
-// Disable warnings in boost::microsec_clock
-// warning C4242: 'argument' : conversion from 'int' to 'unsigned short', possible loss of data
-// warning C4244: 'argument' : conversion from 'int' to 'unsigned short', possible loss of data
-//
-// Boost uses prefix/suffix headers to sets/restore packing 
-// warning C4103: alignment changed after including header, may be due to missing #pragma pack(pop)
-#pragma warning(push)
-#   pragma warning(disable : 4103 4242 4244)
-//#   include <boost/thread/lock_guard.hpp>
-#pragma warning(pop)
 #include <stdint.h>
 
 namespace sfl
@@ -55,7 +44,7 @@ namespace sfl
 		critical_section()
 		{
 			// Hack
-			m_critsec = ClrCreateCriticalSection(CrstGCMemoryPressure, CRST_DEFAULT);
+			m_critsec = ClrCreateCriticalSection(CrstArenaAllocator, CRST_UNSAFE_ANYMODE);
 		}
 
 
@@ -74,13 +63,13 @@ namespace sfl
 		~critical_section()
 		{
 
-			ClrDeleteCriticalSection(&m_critsec);
+			ClrDeleteCriticalSection(m_critsec);
 		}
 
 
 		void lock()
 		{
-			ClrEnterCriticalSection(&m_critsec);
+			ClrEnterCriticalSection(m_critsec);
 		}
 
 
@@ -92,7 +81,7 @@ namespace sfl
 
 		void unlock()
 		{
-			ClrLeaveCriticalSection(&m_critsec);
+			ClrLeaveCriticalSection(m_critsec);
 		}
 
 	private:

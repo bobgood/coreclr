@@ -88,7 +88,7 @@ void _cdecl ArenaControl::SetAllocator(unsigned int type)
 		arenaStack[arenaStackI++] = nullptr;
 		break;
 	case 2:
-		arenaStack[arenaStackI++] = new sfl::NonValidatingArena(Arena::Config(20 * MB, 1000 * MB, IdToAddress(getId())));
+		arenaStack[arenaStackI++] = new sfl::NonValidatingArena(Arena::Config(minBufferSize, maxBufferSize, IdToAddress(getId())));
 		break;
 	case 3:
 		arenaStack[arenaStackI++] = nullptr;
@@ -108,7 +108,7 @@ void Assert(bool ok)
 
 void ArenaControl::DeleteAllocator(void* vallocator)
 {
-	//Arena* allocator = static_cast<Arena*> (vallocator);
-	//if (allocator == nullptr) return;
-	//delete allocator;
+	Arena* allocator = static_cast<Arena*> (vallocator);
+	if (allocator == nullptr) return;
+	delete allocator;
 }
