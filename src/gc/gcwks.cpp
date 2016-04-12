@@ -3,8 +3,8 @@
 // See the LICENSE file in the project root for more information.
 
 
-
 #include "common.h"
+#include "arena.h"
 
 #include "gcenv.h"
 
@@ -12,12 +12,15 @@
 #include "gcscan.h"
 #include "gcdesc.h"
 
+
 #ifdef SERVER_GC
 #undef SERVER_GC
 #endif
 
 namespace WKS { 
+	
 #include "gcimpl.h"
 #include "gc.cpp"
+	
 }
 

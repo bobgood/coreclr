@@ -1,11 +1,14 @@
 // Hack
+#include "common.h"
 #include "arena.h"
 #include "ArenaAllocator.h"
 #include "vector.h"
-thread_local int ArenaControl::arenaStackI = 0;
+
 thread_local void** ArenaControl::arenaStack = nullptr;
+thread_local int ArenaControl::arenaStackI = 0;
 size_t ArenaControl::virtualBase;
 typedef sfl::NonValidatingArena Arena;
+
 
 // lastId keeps track of the last id used to create an arena.  
 // the next one allocated will try at lastId+1, and keep trying
@@ -33,7 +36,7 @@ void ArenaControl::InitArena()
 
 void ArenaControl::ReleaseId(int id)
 {
-	Assert(idInUse[id]);
+	assert(idInUse[id]);
 	idInUse[id] = false;
 }
 
@@ -61,12 +64,6 @@ size_t ArenaControl::IdToAddress(int id)
 	return ((size_t)id << arenaAddressShift) + virtualBase;
 }
 
-void ArenaControl::Assert(bool n)
-{
-	if (n) return;
-	throw("BOB Assert");
-}
-
 // Hack
 // 1 = reset to GCHeap
 // 2 = push new arena allocator
@@ -79,7 +76,7 @@ void _cdecl ArenaControl::SetAllocator(unsigned int type)
 	{
 		arenaStack = new void*[10];
 	}
-	Assert(type >= 1 && type <= 4);
+	assert(type >= 1 && type <= 4);
 	switch (type)
 	{
 	case 1:
@@ -88,7 +85,7 @@ void _cdecl ArenaControl::SetAllocator(unsigned int type)
 		arenaStack[arenaStackI++] = nullptr;
 		break;
 	case 2:
-		arenaStack[arenaStackI++] = new sfl::NonValidatingArena(Arena::Config(20 * MB, 1000 * MB, IdToAddress(getId())));
+		arenaStack[arenaStackI++] = new Arena(Arena::Config(20 * MB, 1000 * MB, IdToAddress(getId())));
 		break;
 	case 3:
 		arenaStack[arenaStackI++] = nullptr;
@@ -100,10 +97,10 @@ void _cdecl ArenaControl::SetAllocator(unsigned int type)
 	}
 } 
 
-void Assert(bool ok)
+void* ArenaControl::Peek()
 {
-	if (ok) return;
-	
+	if (arenaStackI == 0) return nullptr;
+	return arenaStack[arenaStackI - 1];
 }
 
 void ArenaControl::DeleteAllocator(void* vallocator)
@@ -112,3 +109,21 @@ void ArenaControl::DeleteAllocator(void* vallocator)
 	if (allocator == nullptr) return;
 	delete allocator;
 }
+
+inline
+size_t ArenaControl::Align(size_t nbytes, int alignment)
+{
+	return (nbytes + alignment) & ~alignment;
+}
+
+void* ArenaControl::Allocate(size_t jsize)
+{
+	Arena* arena = (Arena*)Peek();
+	if (arena == nullptr)
+	{
+		return nullptr;
+	}
+	size_t size = Align(jsize);
+	return arena->Allocate(size);
+}
+

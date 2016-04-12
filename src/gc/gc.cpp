@@ -2,7 +2,6 @@
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
-
 // 
 // #Overview
 // 
@@ -13197,7 +13196,13 @@ BOOL gc_heap::allocate_more_space(alloc_context* acontext, size_t size,
 
 inline
 CObjectHeader* gc_heap::allocate (size_t jsize, alloc_context* acontext)
-{
+{	
+	void * arenaBuffer = ::ArenaControl::Allocate(jsize);
+	if (arenaBuffer != nullptr)
+	{
+		return (CObjectHeader*)arenaBuffer;
+	}
+
     size_t size = Align (jsize);
     assert (size >= Align (min_obj_size));
     {

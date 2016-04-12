@@ -61,7 +61,7 @@ namespace sfl
 			return reserved;
 		}
 
-		void push_back(T&& v)
+		void push_back(T v)
 		{
 			if (isize >= reserved)
 			{

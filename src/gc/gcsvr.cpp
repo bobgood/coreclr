@@ -5,6 +5,7 @@
 
 
 #include "common.h"
+#include "arena.h"
 
 #if defined(FEATURE_SVR_GC)
 
