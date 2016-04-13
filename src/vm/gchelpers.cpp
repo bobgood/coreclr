@@ -17,6 +17,7 @@
 #include "eetwain.h"
 #include "eeconfig.h"
 #include "gc.h"
+#include "arena.h"
 #include "corhost.h"
 #include "threads.h"
 #include "fieldmarshaler.h"
@@ -393,6 +394,12 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
     }
 #endif
 
+	void* p = ::ArenaControl::Allocate(totalSize);
+	if (p != nullptr)
+	{
+		::ArenaControl::Log("Allocating array", totalSize);
+	}
+
     if (bAllocateInLargeHeap)
     {
         orArray = (ArrayBase *) AllocLHeap(totalSize, FALSE, pArrayMT->ContainsPointers());
@@ -415,6 +422,7 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
         else
 #endif
         {
+			
             orArray = (ArrayBase *) Alloc(totalSize, FALSE, pArrayMT->ContainsPointers());
         }
         orArray->SetMethodTable(pArrayMT);
@@ -987,6 +995,12 @@ OBJECTREF AllocateObject(MethodTable *pMT
         else
 #endif // FEATURE_64BIT_ALIGNMENT
         {
+			void* p = ::ArenaControl::Allocate(pMT->GetBaseSize());
+			if (p != nullptr)
+			{
+				::ArenaControl::Log("AllocateObject arena", pMT->GetBaseSize());
+			}
+
             orObject = (Object *) Alloc(baseSize,
                                         pMT->HasFinalizer(),
                                         pMT->ContainsPointers());

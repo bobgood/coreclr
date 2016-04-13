@@ -69,5 +69,8 @@ public:
 	// returns null if no arena allocator is active, otherwise returns
 	// a pointer to an allocated buffer
 	static void* Allocate(size_t jsize);
+
+	// Log method that writes to STD_OUTPUT
+	static void Log(char* str, size_t n=0);
 };
 

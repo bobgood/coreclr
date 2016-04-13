@@ -85,7 +85,7 @@ void _cdecl ArenaControl::SetAllocator(unsigned int type)
 		arenaStack[arenaStackI++] = nullptr;
 		break;
 	case 2:
-		arenaStack[arenaStackI++] = new Arena(Arena::Config(20 * MB, 1000 * MB, IdToAddress(getId())));
+		arenaStack[arenaStackI++] = new Arena(Arena::Config(minBufferSize, maxBufferSize, IdToAddress(getId())));
 		break;
 	case 3:
 		arenaStack[arenaStackI++] = nullptr;
@@ -125,5 +125,21 @@ void* ArenaControl::Allocate(size_t jsize)
 	}
 	size_t size = Align(jsize);
 	return arena->Allocate(size);
+}
+
+void ArenaControl::Log(char *str, size_t n)
+{
+	DWORD written;
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "Log ", (DWORD)strlen("Log "), &written, 0);
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), str, (DWORD)strlen(str), &written, 0);
+	if (n != 0)
+	{
+		char buf[14];
+		buf[0] = ':'; buf[1] = ' ';
+		buf[2] = '0'; buf[3] = 'x';
+		_ui64toa(n+4, buf, 16);
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, (DWORD)strlen(buf), &written, 0);
+	}
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "\n", (DWORD)strlen("\n"), &written, 0);
 }
 

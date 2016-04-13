@@ -24,6 +24,7 @@
 #include "securitymeta.h"
 #include "dllimport.h"
 #include "gc.h"
+#include "arena.h"
 #include "comdelegate.h"
 #include "jitperf.h" // to track jit perf
 #include "corprof.h"
@@ -2856,6 +2857,7 @@ HCIMPLEND
 HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
 {
     FCALL_CONTRACT;
+	
 
     do
     {
@@ -2872,6 +2874,12 @@ HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
 
         SIZE_T size = methodTable->GetBaseSize();
         _ASSERTE(size % DATA_ALIGNMENT == 0);
+		
+		void* p = ::ArenaControl::Allocate(size);
+		if (p != nullptr)
+		{
+			::ArenaControl::Log("JIT_NewS_MP_FastPortable arena",size);
+		}
 
         alloc_context *allocContext = thread->GetAllocContext();
         BYTE *allocPtr = allocContext->alloc_ptr;
@@ -3304,6 +3312,11 @@ HCIMPLEND
 HCIMPL2(Object*, JIT_NewArr1, CORINFO_CLASS_HANDLE arrayTypeHnd_, INT_PTR size)
 {
     FCALL_CONTRACT;
+	void* p = ::ArenaControl::Allocate(size);
+	if (p != nullptr)
+	{
+		::ArenaControl::Log("JIT_NewArr1 arena",size);
+	}
 
     OBJECTREF newArray = NULL;
 
@@ -3389,6 +3402,7 @@ HCIMPLEND
 */
 OBJECTREF allocNewMDArr(TypeHandle typeHnd, unsigned dwNumArgs, va_list args)
 {
+	::ArenaControl::Log("Enter allocNewMDArr", dwNumArgs);
     CONTRACTL {
         THROWS;
         GC_TRIGGERS;
@@ -3430,6 +3444,7 @@ OBJECTREF allocNewMDArr(TypeHandle typeHnd, unsigned dwNumArgs, va_list args)
 
 HCIMPL2VA(Object*, JIT_NewMDArr, CORINFO_CLASS_HANDLE classHnd, unsigned dwNumArgs)
 {
+	::ArenaControl::Log("Entered JIT_NewMDArr");
     FCALL_CONTRACT;
 
     OBJECTREF    ret = 0;

@@ -13174,8 +13174,8 @@ BOOL gc_heap::allocate_more_space(alloc_context* acontext, size_t size,
     int status;
     do
     { 
-#ifdef MULTIPLE_HEAPS
-        if (alloc_generation_number == 0)
+#ifdef MULTIPLE_HEAPS 
+        if (alloc_generation_number == 0) 
         {
             balance_heaps (acontext);
             status = acontext->alloc_heap->pGenGCHeap->try_allocate_more_space (acontext, size, alloc_generation_number);
@@ -13197,11 +13197,11 @@ BOOL gc_heap::allocate_more_space(alloc_context* acontext, size_t size,
 inline
 CObjectHeader* gc_heap::allocate (size_t jsize, alloc_context* acontext)
 {	
-	void * arenaBuffer = ::ArenaControl::Allocate(jsize);
-	if (arenaBuffer != nullptr)
-	{
-		return (CObjectHeader*)arenaBuffer;
-	}
+	//void * arenaBuffer = ::ArenaControl::Allocate(jsize);
+	//if (arenaBuffer != nullptr)
+	//{
+	//	return (CObjectHeader*)arenaBuffer;
+	//}
 
     size_t size = Align (jsize);
     assert (size >= Align (min_obj_size));

@@ -407,7 +407,14 @@ namespace sfl
 				LPVOID addr = ClrVirtualAlloc((LPVOID)requestAddress, size, MEM_COMMIT, PAGE_READWRITE);		
 				if ((size_t)addr != requestAddress)
 				{
-					throw "ClrVirtualAlloc memory collision";
+					if (addr == 0)
+					{
+						int err = GetLastError();
+						throw "ClrVirtualAlloc error";
+					}
+					else {
+						throw "ClrVirtualAlloc memory collision";
+					}
 				}
 
 				return addr;
