@@ -1,7 +1,8 @@
 // Hack
 #pragma once
-#include <vcruntime.h>
 
+#include <vcruntime.h>
+#define THREAD_LOCAL 
 class ArenaControl
 {
 	// x64 process memory is 8192GB (8TB) (43 bits)
@@ -29,10 +30,10 @@ class ArenaControl
 	static bool idInUse[maxArenas];
 
 	// Each thread holds a stack of arenas (which are in heap memory, not arena memory)
-	static thread_local int arenaStackI;
+	static THREAD_LOCAL int arenaStackI;
 
 	// Allocator type not enforced becuase arena library is incompatible with CLR
-	static thread_local void** arenaStack;
+	static THREAD_LOCAL void** arenaStack;
 
 	// Should be the same as arenaBaseRequest.  This is the actual location in virtual memory for all arenas.
 	static size_t virtualBase;
@@ -75,5 +76,5 @@ public:
 	static void Log(char* str, size_t n=0);
 
 	// the current arena (or null).  Used by Masm code
-	static thread_local void* ArenaControl::arena;
+	static THREAD_LOCAL void* ArenaControl::arena;
 };

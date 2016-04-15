@@ -7,11 +7,11 @@
 // thread_local data. 
 
 // arena is the currently assigned allocator (null if not arena).  This variable is available to MASM code
-thread_local void* ArenaControl::arena = nullptr;
+THREAD_LOCAL void* ArenaControl::arena = nullptr;
 
 // the stack of allocators.  The top of stack is always represented with arena.
-thread_local void** ArenaControl::arenaStack = nullptr;
-thread_local int ArenaControl::arenaStackI = 0;
+THREAD_LOCAL void** ArenaControl::arenaStack = nullptr;
+THREAD_LOCAL int ArenaControl::arenaStackI = 0;
 
 size_t ArenaControl::virtualBase;
 

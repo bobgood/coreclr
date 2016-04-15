@@ -127,8 +127,6 @@ namespace sfl
 		static_assert(offsetof(Config, addr) == ArenaAllocator_Config_addr_Offset, "minBuffer offset is not 8");
 		static_assert(offsetof(Config, maxArenaAlloc) == ArenaAllocator_Config_maxArenaAlloc_Offset, "maxBuffer offset is not 0x10");
 
-
-
 		// c/dtor
 		ArenaAllocator(const Config& config = Config())
 			: m_config(config),
