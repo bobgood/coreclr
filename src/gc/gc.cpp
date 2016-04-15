@@ -13194,15 +13194,10 @@ BOOL gc_heap::allocate_more_space(alloc_context* acontext, size_t size,
     return (status != 0);
 }
 
+
 inline
 CObjectHeader* gc_heap::allocate (size_t jsize, alloc_context* acontext)
-{	
-	//void * arenaBuffer = ::ArenaControl::Allocate(jsize);
-	//if (arenaBuffer != nullptr)
-	//{
-	//	return (CObjectHeader*)arenaBuffer;
-	//}
-
+{		
     size_t size = Align (jsize);
     assert (size >= Align (min_obj_size));
     {

@@ -1,110 +1,16 @@
 #pragma once
 // Hack
-#ifdef USAGE_EXAMPLES
-
-template <typename Unused>
-inline void ArenaUsageExamples()
-{
-
-	//
-	// Basics
-	//
-
-	// Thread safe arena allocator which keeps ref count of allocations
-	sfl::Arena arena;
-
-	void* ptr = arena.Allocate(100 * sizeof(GUID));
-
-	// ...
-
-	arena.Deallocate(ptr);
-
-	// ...
-
-	// Reset arena to its initial state. All memory allocated from the arena
-	// is considered released after this point, and allocator asserts that
-	// number of allocations and deallocations match.
-	arena.Reset();
-
-	//
-	// Configuration settings
-	//
-	// Arena allocator can be configured with following parameters:
-	//
-	//    minBuffer     - initial, preallocated arena buffer, by default 64 KB
-	//    maxBuffer     - max size arena can grow to, by default (minBuffer << 5)
-	//    maxArenaAlloc - max size of allocation that will be satisfied from
-	//                    the arena, by default (minBuffer / 2). 
-	//                    Larger allocation will be sent to overflow allocator.
-
-	// The defaults settings can be changed by passing Arena::Config to the
-	// constructor. 
-
-	// Arena with 128 KB initial buffer size
-	sfl::Arena arean128KB(128 * 1024);
-
-	// Arena with a single, preallocated 4 MB buffer that will not grow
-	const uint32_t _4MB = 4 * 1024 * 1024;
-
-	sfl::Arena arena4MB(sfl::Arena::Config(_4MB, _4MB));
-
-	//
-	// Predefined flavors of arena allocator 
-	//
-
-	// Thread safe, non-validating arena allocator. Deallocate is a noop and thus optional.
-	typedef sfl::NonValidatingArena Arena;
-
-	Arena arena1;
-
-	arena1.Allocate(100);
-	arena1.Reset();
-
-	// Allocator for use in arena-per-thread model. Slightly faster than the thread safe version.
-	sfl::SingleThreadArena arena2;
-
-	// Minimal arena allocator: no validation (Deallocate is noop) and no thread safety.
-	sfl::NonValidatingSingleThreadArena arena3;
-
-	//
-	// Customization via policies
-	//
-
-	class NoAllocator
-	{
-	public:
-		void* Allocate(size_t)
-		{
-			throw std::bad_alloc();
-		}
-
-		void Deallocate(void*)
-		{}
-
-		void Reset()
-		{}
-	};
-
-	// Arena allocator that will not fall back to heap. 
-	// Allocations larger than 1/2 of the minimal arena buffer, and all allocations
-	// after arena buffer(s) are exhausted, will fail with std::bad_alloc exception.
-	typedef sfl::ArenaAllocator<sfl::policy::ThreadSafe, sfl::policy::NoValidation, NoAllocator>
-		NoOverflowArena;
-
-	NoOverflowArena arena4;
-
-	// For usage as STL allocator with standard library containers see StlAllocator.h
-	// For usage with operator new/delete overloading see NewOverload.h
-
-}
-
-#endif // USAGE_EXAMPLES
-
+//
+// This library is a version of ServiceFoundation.Library, with the following modifications:
+// 1. removed Policy classes - we only want thread safe nonvalidating arenas here.
+// 2. Changed locks to use CLR locks
+// 3. replaced all std and boost classes.
+// 4. created a lightweight replacement for vector
+// 5. modified all buffer allocations to use VirtualAlloc
 
 #include "lock.h"
 #include "vector.h"
 #include "HeapAllocator.h"
-#include "AllocatorPolicy.h"
 #include "debugmacros.h"
 
 namespace sfl
@@ -153,11 +59,7 @@ namespace sfl
 #pragma warning(disable: 4324)
 
 	// ArenaAllocator
-	template <typename ConcurrencyPolicy = policy::ThreadSafe,
-		typename AllocationPolicy = policy::RefcountValidation<ConcurrencyPolicy>>
 	class ArenaAllocator
-		: public AllocationPolicy
-
 	{
 	public:
 		// Standard Library allocator adapter
@@ -211,8 +113,20 @@ namespace sfl
 			uint32_t maxArenaAlloc;
 		};
 
+		/////////////////////////////////////////////////////////////////////////////
+		// WARNING WARNING
+		// if these offsets change, they need to be also changed in Asmconstants.tmp
+#define ArenaAllocator_Config_minBuffer_Offset 0
+#define ArenaAllocator_Config_maxBuffer_Offset 4
+#define ArenaAllocator_Config_addr_Offset 8
+#define ArenaAllocator_Config_maxArenaAlloc_Offset 0x10
+		/////////////////////////////////////////////////////////////////////////////
 
-		const Config m_config;
+		static_assert(offsetof(Config, minBuffer) == ArenaAllocator_Config_minBuffer_Offset, "minBuffer offset is not 0");
+		static_assert(offsetof(Config, maxBuffer) == ArenaAllocator_Config_maxBuffer_Offset, "maxBuffer offset is not 4");
+		static_assert(offsetof(Config, addr) == ArenaAllocator_Config_addr_Offset, "minBuffer offset is not 8");
+		static_assert(offsetof(Config, maxArenaAlloc) == ArenaAllocator_Config_maxArenaAlloc_Offset, "maxBuffer offset is not 0x10");
+
 
 
 		// c/dtor
@@ -241,7 +155,6 @@ namespace sfl
 		~ArenaAllocator()
 		{
 			FreeBuffers();
-			AllocationPolicy::Reset();
 		}
 
 
@@ -259,7 +172,6 @@ namespace sfl
 			memset(m_arenaBuffers[0], 0xBA, m_config.minBuffer);
 #endif
 
-			AllocationPolicy::Reset();
 		}
 
 
@@ -267,8 +179,6 @@ namespace sfl
 		// or from overflow allocator if the size is greater than maxArenaAlloc.
 		void* Allocate(size_t size)
 		{
-			AllocationPolicy::Allocate(size);
-
 			if (size > m_config.maxArenaAlloc)
 			{
 				return AllocateOverflow(size);
@@ -290,7 +200,6 @@ namespace sfl
 		// The exact semantics of Deallocate depend on AllocationPolicy. 
 		void Deallocate(void* p)
 		{
-			AllocationPolicy::Deallocate(p);
 		}
 
 
@@ -325,7 +234,7 @@ namespace sfl
 					return NULL;
 				}
 
-				if (ConcurrencyPolicy::CompareExchange(m_nextBlock, nextBlock, myBlock))
+				if (CompareExchange(m_nextBlock, nextBlock, myBlock))
 				{
 					// It is safe to read from m_arenaBuffers vector w/o a lock because
 					// we preallocate it in the constructor and never allow it to grow
@@ -345,7 +254,7 @@ namespace sfl
 		// allocator.
 		void* AllocateSlowPath(uint32_t size)
 		{
-			sfl::lock_guard<typename ConcurrencyPolicy::Lock> guard(m_arenaBuffersLock);
+			sfl::lock_guard<sfl::critical_section> guard(m_arenaBuffersLock);
 
 			for (;;)
 			{
@@ -381,12 +290,22 @@ namespace sfl
 
 			void* p = AllocateBuffer(size);
 
-			sfl::lock_guard<typename ConcurrencyPolicy::Lock> guard(m_arenaBuffersLock);
+			sfl::lock_guard<sfl::critical_section> guard(m_arenaBuffersLock);
 
 			m_overflowBuffers.push_back(p);
 			m_overflowBufferLengths.push_back(size);
 
 			return p;
+		}
+
+		template<typename T>
+		static bool CompareExchange(volatile T& dest, const T& new_value, const T& old_value,
+			typename std::enable_if<sizeof(T) == sizeof(int64_t)>::type* = 0)
+		{
+			return reinterpret_cast<const int64_t&>(old_value) == InterlockedCompareExchange64(
+				reinterpret_cast<volatile int64_t*>(&dest),
+				reinterpret_cast<const int64_t&>(new_value),
+				reinterpret_cast<const int64_t&>(old_value));
 		}
 
 		LPVOID AllocateBuffer(size_t size)
@@ -398,7 +317,7 @@ namespace sfl
 				{
 					requestAddress = m_virtualAddress;
 					auto nextAddress = requestAddress + size;
-					if (ConcurrencyPolicy::CompareExchange(m_virtualAddress, nextAddress, requestAddress))
+					if (CompareExchange(m_virtualAddress, nextAddress, requestAddress))
 					{
 						break;
 					}
@@ -456,7 +375,7 @@ namespace sfl
 			// already present in m_arenaBuffers vector. MemoryBarrier makes sure
 			// that compiler/CPU doesn't reorder the push_back above and update of
 			// m_nextBlock below.
-			ConcurrencyPolicy::MemoryBarrier();
+			::MemoryBarrier();
 
 			// Atomic update of the next block
 			m_nextBlock = nextBlock;
@@ -516,8 +435,15 @@ namespace sfl
 			// Block's offset within the buffer
 			uint32_t bufferOffset;
 		};
+/////////////////////////////////////////////////////////////////////////////
+// WARNING WARNING
+// if these offsets change, they need to be also changed in Asmconstants.inc
+#define ArenaAllocator_Block_bufferIndex_Offset 0
+#define ArenaAllocator_Block_bufferOffset_Offset 4
+/////////////////////////////////////////////////////////////////////////////
 
-
+		static_assert(offsetof(Block, bufferIndex) == ArenaAllocator_Block_bufferIndex_Offset, "bufferIndex offset is not 0");
+		static_assert(offsetof(Block, bufferOffset) == ArenaAllocator_Block_bufferOffset_Offset, "bufferOffset offset is not 4");
 		// If user tries to shoot himself in the foot and calls global operator
 		// delete() or free() on an arena allocated object, offsetting first
 		// allocation by a few bytes will make sure he doesn't miss. 
@@ -528,12 +454,17 @@ namespace sfl
 			0;
 #endif
 
+		// the following fields are public only for MASM access
+		public:
+
 		// Descriptor of the next available block of memory
 		volatile Block                      m_nextBlock;
 
+		const Config m_config;
+
 		// List of arena buffers and lock for updates
 		vector<void*>                  m_arenaBuffers;
-		typename ConcurrencyPolicy::Lock    m_arenaBuffersLock;
+		sfl::critical_section    m_arenaBuffersLock;
 
 		// List of overflow buffers
 		vector<void*>                  m_overflowBuffers;
@@ -543,22 +474,24 @@ namespace sfl
 
 
 		volatile size_t m_virtualAddress;
-	};
 
+
+
+	};
 
 #pragma warning(pop)
 
+/////////////////////////////////////////////////////////////////////////////
+// WARNING WARNING
+// if these offsets change, they need to be also changed in Asmconstants.inc
+#define ArenaAllocator_m_nextBlock_Offset 0
+#define ArenaAllocator_m_config_Offset 8
+#define ArenaAllocator_m_arenaBuffers 0x20
+/////////////////////////////////////////////////////////////////////////////
+#define offsetofv(s,m)   (size_t)( (ptrdiff_t)&reinterpret_cast<volatile char&>((((s *)0)->m)) )
+	static_assert(offsetofv(ArenaAllocator, m_nextBlock) == ArenaAllocator_m_nextBlock_Offset, "m_nextBlock offset is not 0");
+	static_assert(offsetof(ArenaAllocator, m_config) == ArenaAllocator_m_config_Offset, "m_nextBlock offset is not 8");
+	static_assert(offsetof(ArenaAllocator, m_arenaBuffers) == ArenaAllocator_m_arenaBuffers, "m_nextBlock offset is not 0x20");
 
-	typedef ArenaAllocator<>
-		Arena;
-
-	typedef ArenaAllocator<policy::ThreadSafe, policy::NoValidation>
-		NonValidatingArena;
-
-	typedef ArenaAllocator<policy::SingleThread>
-		SingleThreadArena;
-
-	typedef ArenaAllocator<policy::SingleThread, policy::NoValidation>
-		NonValidatingSingleThreadArena;
 
 }; // namespace sfl

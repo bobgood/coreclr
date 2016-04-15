@@ -30,6 +30,7 @@ class ArenaControl
 
 	// Each thread holds a stack of arenas (which are in heap memory, not arena memory)
 	static thread_local int arenaStackI;
+
 	// Allocator type not enforced becuase arena library is incompatible with CLR
 	static thread_local void** arenaStack;
 
@@ -54,7 +55,7 @@ private:
 	static void ReleaseId(int id);
 
 	// Gets the allocator at the top of the stack
-	inline static void* Peek();
+	inline static void* GetArena();
 
 	// Address alignment copied from "gcpriv.h" 
 	inline static size_t Align(size_t nbytes, int alignment = 7);
@@ -72,5 +73,7 @@ public:
 
 	// Log method that writes to STD_OUTPUT
 	static void Log(char* str, size_t n=0);
-};
 
+	// the current arena (or null).  Used by Masm code
+	static thread_local void* ArenaControl::arena;
+};

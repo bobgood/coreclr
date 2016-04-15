@@ -14,6 +14,8 @@
 
 #include "../../inc/switches.h"
 
+
+
 #ifndef ASMCONSTANTS_C_ASSERT
 #define ASMCONSTANTS_C_ASSERT(cond)
 #endif
@@ -175,6 +177,8 @@ ASMCONSTANTS_C_ASSERT(OFFSETOF__ThreadExceptionState__m_pCurrentTracker
 
 #define               THREAD_CATCHATSAFEPOINT_BITS 0x5F
 ASMCONSTANTS_C_ASSERT(THREAD_CATCHATSAFEPOINT_BITS == Thread::TS_CatchAtSafePoint);
+
+
 #endif // CROSSGEN_COMPILE
 
 

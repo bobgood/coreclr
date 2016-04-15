@@ -37,8 +37,19 @@ JIT_Box                 equ     ?JIT_Box@@YAPEAVObject@@PEAUCORINFO_CLASS_STRUCT
 g_pStringClass          equ     ?g_pStringClass@@3PEAVMethodTable@@EA
 FramedAllocateString    equ     ?FramedAllocateString@@YAPEAVStringObject@@K@Z
 JIT_NewArr1             equ     ?JIT_NewArr1@@YAPEAVObject@@PEAUCORINFO_CLASS_STRUCT_@@_J@Z
-
+ArenaControl_arena      equ     ?arena@ArenaControl@@2PEAXEA
 INVALIDGCVALUE          equ     0CCCCCCCDh
+
+; These should be in AsmConstants.inc, but I could not figure out how...
+ArenaAllocator_m_nextBlock_Offset          EQU 0
+ArenaAllocator_m_config_Offset             EQU 8
+ArenaAllocator_m_arenaBuffers              EQU 20h
+ArenaAllocator_Config_minBuffer_Offset     EQU 0
+ArenaAllocator_Config_maxBuffer_Offset     EQU 4
+ArenaAllocator_Config_addr_Offset          EQU 8
+ArenaAllocator_Config_maxArenaAlloc_Offset EQU 10h
+ArenaAllocator_Block_bufferIndex_Offset    EQU 0
+ArenaAllocator_Block_bufferOffset_Offset   EQU 4
 
 extern JIT_NEW:proc
 extern CopyValueClassUnchecked:proc
@@ -46,12 +57,14 @@ extern JIT_Box:proc
 extern g_pStringClass:QWORD
 extern FramedAllocateString:proc
 extern JIT_NewArr1:proc
-
+ 
 extern JIT_InternalThrow:proc
+extern ArenaControl_arena:ptr QWORD
 
 ifdef _DEBUG
 extern DEBUG_TrialAllocSetAppDomain:proc
 extern DEBUG_TrialAllocSetAppDomain_NoScratchArea:proc
+extern _tls_index:DWORD
 endif
 
 ; IN: rcx: MethodTable*
@@ -59,6 +72,16 @@ endif
 LEAF_ENTRY JIT_TrialAllocSFastMP_InlineGetThread, _TEXT
         mov     edx, [rcx + OFFSET__MethodTable__m_BaseSize]
 
+
+    	;if (ArenaControl_arena == nullptr)
+		mov         eax,SECTIONREL ArenaControl_arena ;(07FFC07F62010h)+0F809E000h  
+		mov         r11d,dword ptr [_tls_index]  
+		mov         r10, qword ptr gs:[58h]  
+		mov         r11, qword ptr [r10+r11*8]  
+		mov         r10,qword ptr [rax+r11]
+		test        r10,r10
+		jne         ArenaAllocation
+ 
         ; m_BaseSize is guaranteed to be a multiple of 8.
 
         PATCHABLE_INLINE_GETTHREAD r11, JIT_TrialAllocSFastMP_InlineGetThread__PatchTLSOffset
@@ -81,6 +104,53 @@ endif ; _DEBUG
 
     AllocFailed:
         jmp     JIT_NEW
+
+    ArenaAllocation: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;ebx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+ArenaAbort:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW
 LEAF_END JIT_TrialAllocSFastMP_InlineGetThread, _TEXT
 
 ; HCIMPL2(Object*, JIT_Box, CORINFO_CLASS_HANDLE type, void* unboxedData)

@@ -5,6 +5,7 @@ namespace sfl
 	template<class T>
 	class vector
 	{
+	public: 
 		static const int fixedsize = 100;
 		T array[fixedsize];
 		size_t isize;

@@ -4,10 +4,19 @@
 #include "ArenaAllocator.h"
 #include "vector.h"
 
+// thread_local data. 
+
+// arena is the currently assigned allocator (null if not arena).  This variable is available to MASM code
+thread_local void* ArenaControl::arena = nullptr;
+
+// the stack of allocators.  The top of stack is always represented with arena.
 thread_local void** ArenaControl::arenaStack = nullptr;
 thread_local int ArenaControl::arenaStackI = 0;
+
 size_t ArenaControl::virtualBase;
-typedef sfl::NonValidatingArena Arena;
+
+
+typedef sfl::ArenaAllocator Arena;
 
 
 // lastId keeps track of the last id used to create an arena.  
@@ -83,24 +92,29 @@ void _cdecl ArenaControl::SetAllocator(unsigned int type)
 		for (int i = 0; i < arenaStackI; i++) DeleteAllocator(arenaStack[i]);
 		arenaStackI = 0;
 		arenaStack[arenaStackI++] = nullptr;
+		arena = nullptr;
 		break;
 	case 2:
-		arenaStack[arenaStackI++] = new Arena(Arena::Config(minBufferSize, maxBufferSize, IdToAddress(getId())));
+		arena = new Arena(Arena::Config(minBufferSize, maxBufferSize, IdToAddress(getId())));
+		arenaStack[arenaStackI++] = arena;
 		break;
 	case 3:
 		arenaStack[arenaStackI++] = nullptr;
+		arena = nullptr;
 		break;
 	case 4:
 		DeleteAllocator(arenaStack[--arenaStackI]);
-		if (arenaStack < 0) arenaStackI = 0;
+		arena = nullptr;
+		if (arenaStackI > 0) {
+			arena = arenaStack[arenaStackI - 1];
+		}
 		break;
 	}
 } 
 
-void* ArenaControl::Peek()
+void* ArenaControl::GetArena()
 {
-	if (arenaStackI == 0) return nullptr;
-	return arenaStack[arenaStackI - 1];
+	return arena;
 }
 
 void ArenaControl::DeleteAllocator(void* vallocator)
@@ -117,14 +131,13 @@ size_t ArenaControl::Align(size_t nbytes, int alignment)
 }
 
 void* ArenaControl::Allocate(size_t jsize)
-{
-	Arena* arena = (Arena*)Peek();
+{	
 	if (arena == nullptr)
 	{
 		return nullptr;
 	}
 	size_t size = Align(jsize);
-	return arena->Allocate(size);
+	return ((Arena*)arena)->Allocate(size);
 }
 
 void ArenaControl::Log(char *str, size_t n)
@@ -137,7 +150,7 @@ void ArenaControl::Log(char *str, size_t n)
 		char buf[14];
 		buf[0] = ':'; buf[1] = ' ';
 		buf[2] = '0'; buf[3] = 'x';
-		_ui64toa(n+4, buf, 16);
+		_ui64toa(n, buf + 4, 16);
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, (DWORD)strlen(buf), &written, 0);
 	}
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "\n", (DWORD)strlen("\n"), &written, 0);
