@@ -99,18 +99,31 @@ void _cdecl ArenaControl::SetAllocator(unsigned int type)
 		arenaStack[arenaStackI++] = arena;
 		break;
 	case 3:
-		arenaStack[arenaStackI++] = nullptr;
-		arena = nullptr;
+		PushGC();
 		break;
 	case 4:
-		DeleteAllocator(arenaStack[--arenaStackI]);
-		arena = nullptr;
-		if (arenaStackI > 0) {
-			arena = arenaStack[arenaStackI - 1];
-		}
+		Pop();
 		break;
 	}
 } 
+
+void _cdecl ArenaControl::PushGC()
+{
+	if (ArenaControl::arenaStack == nullptr) return;
+	arenaStack[arenaStackI++] = nullptr;
+	arena = nullptr;
+}
+
+
+void _cdecl ArenaControl::Pop()
+{
+	if (ArenaControl::arenaStack == nullptr) return;
+	DeleteAllocator(arenaStack[--arenaStackI]);
+	arena = nullptr;
+	if (arenaStackI > 0) {
+		arena = arenaStack[arenaStackI - 1];
+	}
+}
 
 void* ArenaControl::GetArena()
 {
@@ -155,4 +168,5 @@ void ArenaControl::Log(char *str, size_t n)
 	}
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "\n", (DWORD)strlen("\n"), &written, 0);
 }
+
 

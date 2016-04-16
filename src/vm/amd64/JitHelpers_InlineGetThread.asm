@@ -117,7 +117,7 @@ endif ; _DEBUG
 	;eax contains the size of the buffer
 		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
 		add     ebx, edx
-	;ebx holds the proposed end of the buffer if the allocation is taken.
+	;rbx holds the proposed end of the buffer if the allocation is taken.
 	    cmp     ebx,eax
 		jge      ArenaAbort
 	;We fit

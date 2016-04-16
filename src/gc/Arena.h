@@ -2,8 +2,8 @@
 #pragma once
 
 #include <vcruntime.h>
-#define THREAD_LOCAL 
-class ArenaControl
+#define THREAD_LOCAL thread_local
+class ArenaControl 
 {
 	// x64 process memory is 8192GB (8TB) (43 bits)
 	// Each arena uses a fixed location in virtual memory, which are precalculated based on constants.
@@ -18,6 +18,7 @@ class ArenaControl
 
 											  // The base address of arenas (to distinguish arenas from other memory)
 	static const size_t arenaBaseRequest = 1ULL << 42; // half of virtual address space reserved for arenas
+	static const size_t arenaRangeEnd = arenaBaseRequest + ((size_t)maxArenas << arenaAddressShift);
 
 													   // Minimum and maximum size of buffers allocated to arenas (each new buffer is twice the size of the prior)
 	static const size_t minBufferSize = 1ULL << 24;  //(16MB) min per arena
@@ -77,4 +78,31 @@ public:
 
 	// the current arena (or null).  Used by Masm code
 	static THREAD_LOCAL void* ArenaControl::arena;
+
+	// system code (i.e. JIT) that runs in the user thread should not use arenas.
+	static void PushGC();
+	static void Pop();
+
+	static bool IsArenaAddress(void*p) {
+		size_t a = (size_t)p; return (a >= arenaBaseRequest && a < arenaRangeEnd);
+	}
 };
+
+#define ISARENA(x) ::ArenaControl::IsArenaAddress(x)
+
+class GCSection
+{
+public:
+	GCSection()
+	{
+		::ArenaControl::PushGC();
+	}
+
+	~GCSection()
+	{
+		::ArenaControl::Pop();
+	}
+};
+
+// use this declaration to disallow arena allocations until the scope containing this declaration expires.
+#define NOT_ARENA_SECTION GCSection tmp_GCSection;

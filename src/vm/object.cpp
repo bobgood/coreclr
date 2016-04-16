@@ -18,6 +18,7 @@
 #include "excep.h"
 #include "eeconfig.h"
 #include "gc.h"
+#include "arena.h"
 #ifdef FEATURE_REMOTING
 #include "remoting.h"
 #endif
@@ -1665,6 +1666,11 @@ VOID Object::Validate(BOOL bDeep, BOOL bVerifyNextHeader, BOOL bVerifySyncBlock)
         return;     // NULL is ok
     }
 
+	if (ISARENA(this))
+	{
+		return;
+	}
+
     if (g_IBCLogger.InstrEnabled() && !GCStress<cfg_any>::IsEnabled())
     {
         // If we are instrumenting for IBC (and GCStress is not enabled)
@@ -1742,8 +1748,15 @@ VOID Object::ValidateInner(BOOL bDeep, BOOL bVerifyNextHeader, BOOL bVerifySyncB
             bSmallObjectHeapPtr = GCHeap::GetGCHeap()->IsHeapPointer(this, TRUE);
             if (!bSmallObjectHeapPtr)
                 bLargeObjectHeapPtr = GCHeap::GetGCHeap()->IsHeapPointer(this);
+
+			if (!(bSmallObjectHeapPtr || bLargeObjectHeapPtr))
+			{
+				if (!ISARENA(this))
+				{
+					CHECK_AND_TEAR_DOWN(bSmallObjectHeapPtr || bLargeObjectHeapPtr);
+				}
+			}
                 
-            CHECK_AND_TEAR_DOWN(bSmallObjectHeapPtr || bLargeObjectHeapPtr);
         }
 
         lastTest = 3;

@@ -98,6 +98,13 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers )
                    (bFinalize ? GC_ALLOC_FINALIZE : 0));
 
     Object *retVal = NULL;
+	retVal = (Object *)::ArenaControl::Allocate(size);
+	if (retVal != nullptr)
+	{
+
+		::ArenaControl::Log("AllocateObject arena", size);
+		return retVal;
+	}
 
     // We don't want to throw an SO during the GC, so make sure we have plenty
     // of stack before calling in.
@@ -126,6 +133,13 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
                    (bAlignBias ? GC_ALLOC_ALIGN8_BIAS : 0));
 
     Object *retVal = NULL;
+	retVal = (Object *)::ArenaControl::Allocate(size);
+	if (retVal != nullptr)
+	{
+
+		::ArenaControl::Log("AllocateObject arena", size);
+		return retVal;
+	}
 
     // We don't want to throw an SO during the GC, so make sure we have plenty
     // of stack before calling in.
@@ -169,6 +183,14 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers )
                    (bFinalize ? GC_ALLOC_FINALIZE : 0));
 
     Object *retVal = NULL;
+	retVal = (Object *)::ArenaControl::Allocate(size);
+	if (retVal != nullptr)
+	{
+		
+		::ArenaControl::Log("AllocateObject arena", size);
+		return retVal;
+	}
+
 
     // We don't want to throw an SO during the GC, so make sure we have plenty
     // of stack before calling in.
@@ -397,10 +419,11 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	void* p = ::ArenaControl::Allocate(totalSize);
 	if (p != nullptr)
 	{
+		orArray->SetMethodTable(pArrayMT);
+		// Finalizers and Pointer flags sent to AllocHeap, etc appear not to be needed
 		::ArenaControl::Log("Allocating array", totalSize);
-	}
-
-    if (bAllocateInLargeHeap)
+	} 
+	else if (bAllocateInLargeHeap)
     {
         orArray = (ArrayBase *) AllocLHeap(totalSize, FALSE, pArrayMT->ContainsPointers());
         orArray->SetMethodTableForLargeObject(pArrayMT);
@@ -605,6 +628,7 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
     BOOL bPublish = bAllocateInLargeHeap;
 
     ArrayBase* orObject;
+
     if (bAllocateInLargeHeap)
     {
         orObject = (ArrayBase*) AllocLHeap(totalSize, FALSE, FALSE);
@@ -998,12 +1022,16 @@ OBJECTREF AllocateObject(MethodTable *pMT
 			void* p = ::ArenaControl::Allocate(pMT->GetBaseSize());
 			if (p != nullptr)
 			{
+				orObject = (Object*)p;
 				::ArenaControl::Log("AllocateObject arena", pMT->GetBaseSize());
 			}
+			else
+			{
 
-            orObject = (Object *) Alloc(baseSize,
-                                        pMT->HasFinalizer(),
-                                        pMT->ContainsPointers());
+				orObject = (Object *)Alloc(baseSize,
+					pMT->HasFinalizer(),
+					pMT->ContainsPointers());
+			}
         }
 
         // verify zero'd memory (at least for sync block)

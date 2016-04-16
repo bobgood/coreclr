@@ -19,6 +19,9 @@
 include AsmMacros.inc
 include asmconstants.inc
 
+extern JIT_InternalThrow:proc
+MIN_SIZE equ 28h
+E_ACCESSDENIED equ 80070005h
 
 ; Two super fast helpers that together do the work of JIT_WriteBarrier.  These
 ; use inlined ephemeral region bounds and an inlined pointer to the card table.
@@ -47,6 +50,16 @@ LEAF_ENTRY JIT_WriteBarrier_PreGrow32, _TEXT
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
+		 mov     rax, rdx
+		xor     rax,rcx
+		bt      rax,42
+		jc	    MixedArenaGC
+	    bt      rcx,42
+		jnc     NotMixedArenaGC
+		shr     rax,32
+		and      eax,3ffh
+		jne      MixedArenaGC
+NotMixedArenaGC:
         mov     [rcx], rdx
 
         NOP_2_BYTE ; padding for alignment of constant
@@ -67,6 +80,11 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
     UpdateCardTable:
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
+	MixedArenaGC:
+		mov     rcx, E_ACCESSDENIED ; access denied 
+        add     rsp, MIN_SIZE
+        ; void JIT_InternalThrow(unsigned exceptNum)
+        jmp     JIT_InternalThrow
 
     align 16
     Exit:
@@ -80,6 +98,17 @@ LEAF_ENTRY JIT_WriteBarrier_PreGrow64, _TEXT
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
+		 mov     rax, rdx
+		xor     rax,rcx
+		bt      rax,42
+		jc	    MixedArenaGC2
+	    bt      rcx,42
+		jnc      NotMixedArenaGC2
+		shr     rax,32
+		and      eax,3ffh
+		jne      MixedArenaGC2
+ 
+NotMixedArenaGC2:
         mov     [rcx], rdx
 
         NOP_3_BYTE ; padding for alignment of constant
@@ -107,6 +136,11 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow64_Patch_Label_CardTable
     UpdateCardTable:
         mov     byte ptr [rcx + rax], 0FFh
         ret
+MixedArenaGC2:
+		mov     rcx, E_ACCESSDENIED ; access denied 
+        add     rsp, MIN_SIZE
+        ; void JIT_InternalThrow(unsigned exceptNum)
+        jmp     JIT_InternalThrow  
 
     align 16
     Exit:
@@ -117,6 +151,16 @@ LEAF_END_MARKED JIT_WriteBarrier_PreGrow64, _TEXT
 ; See comments for JIT_WriteBarrier_PreGrow (above).
 LEAF_ENTRY JIT_WriteBarrier_PostGrow64, _TEXT
         align 8
+		 mov     rax, rdx
+		xor     rax,rcx
+		bt      rax,42
+		jc	    MixedArenaGC3
+	    bt      rcx,42
+		jnc      NotMixedArenaGC3
+		shr     rax,32
+		and      eax,3ffh
+		jne      MixedArenaGC3
+NotMixedArenaGC3:
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
@@ -160,6 +204,12 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow64_Patch_Label_CardTable
         mov     byte ptr [rcx + rax], 0FFh
         ret
 
+MixedArenaGC3:
+		mov     rcx, E_ACCESSDENIED ; access denied 
+        add     rsp, MIN_SIZE
+        ; void JIT_InternalThrow(unsigned exceptNum)
+        jmp     JIT_InternalThrow
+
     align 16
     Exit:
         REPRET
@@ -167,6 +217,17 @@ LEAF_END_MARKED JIT_WriteBarrier_PostGrow64, _TEXT
 
 LEAF_ENTRY JIT_WriteBarrier_PostGrow32, _TEXT
         align 4
+		 mov     rax, rdx
+		xor     rax,rcx
+		bt      rax,42
+		jc	    MixedArenaGC4
+	    bt      rcx,42
+		jnc      NotMixedArenaGC4
+		shr     rax,32
+		and      eax,3ffh
+		jbe      MixedArenaGC4
+
+NotMixedArenaGC4:
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
@@ -201,6 +262,11 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow32_PatchLabel_UpdateCardTable
     UpdateCardTable:
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
+MixedArenaGC4:
+		mov     rcx, E_ACCESSDENIED ; access denied 
+        add     rsp, MIN_SIZE
+        ; void JIT_InternalThrow(unsigned exceptNum)
+        jmp     JIT_InternalThrow
 
     align 16
     Exit:
@@ -217,6 +283,17 @@ LEAF_ENTRY JIT_WriteBarrier_SVR32, _TEXT
         ; unconditionally.
         ;
 
+		 mov     rax, rdx
+		xor     rax,rcx
+		bt      rax,42
+		jc	    MixedArenaGC5
+	    bt      rcx,42
+		jnc      NotMixedArenaGC5
+		shr     rax,32
+		and      eax,3ffh
+		jne      MixedArenaGC5
+
+NotMixedArenaGC5:
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
@@ -238,6 +315,13 @@ PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_UpdateCardTable
     UpdateCardTable:
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
+
+MixedArenaGC5:
+		mov     rcx, E_ACCESSDENIED ; access denied 
+        add     rsp, MIN_SIZE
+        ; void JIT_InternalThrow(unsigned exceptNum)
+        jmp     JIT_InternalThrow
+
 LEAF_END_MARKED JIT_WriteBarrier_SVR32, _TEXT
 
 LEAF_ENTRY JIT_WriteBarrier_SVR64, _TEXT
@@ -248,7 +332,17 @@ LEAF_ENTRY JIT_WriteBarrier_SVR64, _TEXT
         ; bounds checking all together and do our card table update 
         ; unconditionally.
         ;
+		 mov     rax, rdx
+		xor     rax,rcx
+		bt      rax,42
+		jc	    MixedArenaGC6
+	    bt      rcx,42
+		jnc      NotMixedArenaGC6
+		shr     rax,32
+		and      eax,3ffh
+		jne      MixedArenaGC6
 
+NotMixedArenaGC6:
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
@@ -269,6 +363,12 @@ PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
     UpdateCardTable:
         mov     byte ptr [rcx + rax], 0FFh
         ret
+
+MixedArenaGC6:
+		mov     rcx, E_ACCESSDENIED ; access denied 
+        add     rsp, MIN_SIZE
+        ; void JIT_InternalThrow(unsigned exceptNum)
+        jmp     JIT_InternalThrow
 LEAF_END_MARKED JIT_WriteBarrier_SVR64, _TEXT
 
         end

@@ -26,6 +26,7 @@
 #include "eventtrace.h"
 #include "constrainedexecutionregion.h"
 #include "array.h"
+#include "..\gc\Arena.h"
 #include "compile.h"
 #include "ecall.h"
 #include "virtualcallstub.h"
@@ -254,7 +255,9 @@ void DACNotifyCompilationFinished(MethodDesc *methodDesc)
 
 PCODE MethodDesc::MakeJitWorker(COR_ILMETHOD_DECODER* ILHeader, DWORD flags, DWORD flags2)
 {
+	
     STANDARD_VM_CONTRACT;
+	NOT_ARENA_SECTION
 
     BOOL fIsILStub = IsILStub();        // @TODO: understand the need for this special case
 

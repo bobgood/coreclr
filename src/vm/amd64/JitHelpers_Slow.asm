@@ -21,6 +21,7 @@ include asmconstants.inc
 
 ; Min amount of stack space that a nested function should allocate.
 MIN_SIZE equ 28h
+E_ACCESSDENIED equ 80070005h
 
 EXTERN  g_ephemeral_low:QWORD
 EXTERN  g_ephemeral_high:QWORD
@@ -57,6 +58,7 @@ extern JIT_GetSharedNonGCStaticBase_Helper:proc
 extern JIT_GetSharedGCStaticBase_Helper:proc
 
 extern JIT_InternalThrow:proc
+
 
 ifdef _DEBUG
 ; Version for when we're sure to be in the GC, checks whether or not the card
@@ -105,7 +107,15 @@ ifdef WRITE_BARRIER_CHECK
 endif
 
         mov     rax, rdx
-
+		xor     rax,rcx
+		bt      rax,42
+		jnc	    MixedArenaGC
+	    bt      rcx,42
+		jc      NotMixedArenaGC
+		shr     rax,32
+		or      eax,3ffh
+		jne     MixedArenaGC
+NotMixedArenaGC:
         ; Do the move. It is correct to possibly take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
@@ -137,6 +147,12 @@ endif
     UpdateCardTable:
         mov     byte ptr [rcx], 0FFh
         ret
+
+	MixedArenaGC:
+		mov     rcx, 80070005h ; access denied 
+        add     rsp, MIN_SIZE
+        ; void JIT_InternalThrow(unsigned exceptNum)
+        jmp     JIT_InternalThrow
 
     align 16
     Exit:
