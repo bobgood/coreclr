@@ -3465,14 +3465,6 @@ HCIMPL2VA(Object*, JIT_NewMDArr, CORINFO_CLASS_HANDLE classHnd, unsigned dwNumAr
 }
 HCIMPLEND
 
-HCIMPL2(void, MixedWriteBarrier, Object* dst, Object*src)
-{
-	RuntimeExceptionKind except;
-	except = kMixedWriteBarrierException;
-
-	FCThrow(except);
-}
-HCIMPLEND
 /*************************************************************/
 /* returns '&array[idx], after doing all the proper checks */
 
