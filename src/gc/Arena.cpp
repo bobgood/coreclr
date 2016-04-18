@@ -111,13 +111,15 @@ void _cdecl ArenaControl::PushGC()
 {
 	if (ArenaControl::arenaStack == nullptr) return;
 	arenaStack[arenaStackI++] = nullptr;
+	if (arenaStackI > 7) { Log("arenastack overflow"); }
 	arena = nullptr;
 }
 
-
+int Popcnt = 0;
 void _cdecl ArenaControl::Pop()
 {
 	if (ArenaControl::arenaStack == nullptr) return;
+	Popcnt++;
 	DeleteAllocator(arenaStack[--arenaStackI]);
 	arena = nullptr;
 	if (arenaStackI > 0) {

@@ -1545,7 +1545,7 @@ HCIMPLEND
 HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Helper, DomainLocalModule *pLocalModule, DWORD dwClassDomainID)
 {
     FCALL_CONTRACT;
-
+	START_NOT_ARENA_SECTION
     HELPER_METHOD_FRAME_BEGIN_RET_0();
     
     // Obtain Method table
@@ -1555,14 +1555,16 @@ HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Helper, DomainLocalModule *pLocalMod
     pMT->CheckRunClassInitThrowing();
     HELPER_METHOD_FRAME_END();
     
-    return (void*)pLocalModule->GetPrecomputedNonGCStaticsBasePointer();
+    auto r= (void*)pLocalModule->GetPrecomputedNonGCStaticsBasePointer();
+	END_NOT_ARENA_SECTION
+		return r;
 }
 HCIMPLEND
 
 HCIMPL2(void*, JIT_GetSharedGCStaticBase_Helper, DomainLocalModule *pLocalModule, DWORD dwClassDomainID)
 {
     FCALL_CONTRACT;
-
+	START_NOT_ARENA_SECTION
     HELPER_METHOD_FRAME_BEGIN_RET_0();
     
     // Obtain Method table
@@ -1572,7 +1574,9 @@ HCIMPL2(void*, JIT_GetSharedGCStaticBase_Helper, DomainLocalModule *pLocalModule
     pMT->CheckRunClassInitThrowing();
     HELPER_METHOD_FRAME_END();
 
-    return (void*)pLocalModule->GetPrecomputedGCStaticsBasePointer();
+	auto r = (void*)pLocalModule->GetPrecomputedGCStaticsBasePointer();
+	END_NOT_ARENA_SECTION
+		return r;
 }
 HCIMPLEND
 

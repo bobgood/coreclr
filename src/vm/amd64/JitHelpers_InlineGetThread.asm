@@ -343,8 +343,16 @@ LEAF_ENTRY JIT_NewArr1OBJ_MP_InlineGetThread, _TEXT
         ; We were passed a type descriptor in RCX, which contains the (shared)
         ; array method table and the element type.
 
-        ; The element count is in RDX
+		;if (ArenaControl_arena == nullptr)
+		mov         eax,SECTIONREL ArenaControl_arena ;(07FFC07F62010h)+0F809E000h  
+		mov         r11d,dword ptr [_tls_index]  
+		mov         r10, qword ptr gs:[58h]  
+		mov         r11, qword ptr [r10+r11*8]  
+		mov         r10,qword ptr [rax+r11]
+		test        r10,r10
+		jne         ArenaAllocation2
 
+        ; The element count is in RDX
         ; NOTE: if this code is ported for CORINFO_HELP_NEWSFAST_ALIGN8, it will need
         ; to emulate the double-specific behavior of JIT_TrialAlloc::GenAllocArray.
 
@@ -390,9 +398,57 @@ endif ; _DEBUG
 
         ret
 
+ArenaAllocation2: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;rbx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort2
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+   
     OversizedArray:
     AllocFailed:
         jmp     JIT_NewArr1
+
+		ArenaAbort2:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW
 LEAF_END JIT_NewArr1OBJ_MP_InlineGetThread, _TEXT
 
 

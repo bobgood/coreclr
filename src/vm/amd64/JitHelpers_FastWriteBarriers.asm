@@ -52,18 +52,25 @@ LEAF_ENTRY JIT_WriteBarrier_PreGrow32, _TEXT
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
 		 mov     rax, rdx
 		xor     rax,rcx
-		bt      rax,42
-		jc	    MixedArenaGC
-	    bt      rcx,42
-		jnc     NotMixedArenaGC
+		mov   r10,1
+		shl   r10,42
+		test   rax, r10
+		jnz    MixedArenaGC
+;		bt      rax,42
+;		jc	    MixedArenaGC
+		test   rcx, r10
+		jz   NotMixedArenaGC
+;	    bt      rcx,42
+;		jnc      NotMixedArenaGC
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC
 NotMixedArenaGC:
         mov     [rcx], rdx
 
-        NOP_2_BYTE ; padding for alignment of constant
+        ;NOP_3_BYTE ; padding for alignment of constant
 
+		
 PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_Lower
         cmp     rdx, 0F0F0F0F0h
         jb      Exit
@@ -98,12 +105,18 @@ LEAF_ENTRY JIT_WriteBarrier_PreGrow64, _TEXT
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
-		 mov     rax, rdx
+		mov     rax, rdx
 		xor     rax,rcx
-		bt      rax,42
-		jc	    MixedArenaGC2
-	    bt      rcx,42
-		jnc      NotMixedArenaGC2
+		mov     r10, 1
+		shl     r10,42
+		test    rax, r10
+		jnz     MixedArenaGC2
+;		bt      rax,42
+;		jc	    MixedArenaGC2
+		test    rcx, r10
+		jz      NotMixedArenaGC2
+;	    bt      rcx,42
+;		jnc      NotMixedArenaGC2
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC2
@@ -111,7 +124,9 @@ LEAF_ENTRY JIT_WriteBarrier_PreGrow64, _TEXT
 NotMixedArenaGC2:
         mov     [rcx], rdx
 
-        NOP_3_BYTE ; padding for alignment of constant
+         NOP_3_BYTE ; padding for alignment of constant
+         NOP; padding for alignment of constant
+		 NOP;
 
         ; Can't compare a 64 bit immediate, so we have to move it into a
         ; register.  Value of this immediate will be patched at runtime.
@@ -153,10 +168,16 @@ LEAF_ENTRY JIT_WriteBarrier_PostGrow64, _TEXT
         align 8
 		 mov     rax, rdx
 		xor     rax,rcx
-		bt      rax,42
-		jc	    MixedArenaGC3
-	    bt      rcx,42
-		jnc      NotMixedArenaGC3
+		mov   r10,1
+		shl   r10,42
+		test   rax, r10
+		jnz    MixedArenaGC3
+;		bt      rax,42
+;		jc	    MixedArenaGC3
+		test   rcx, r10
+		jz   NotMixedArenaGC3
+;	    bt      rcx,42
+;		jnc      NotMixedArenaGC3
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC3
@@ -168,6 +189,8 @@ NotMixedArenaGC3:
         mov     [rcx], rdx
 
         NOP_3_BYTE ; padding for alignment of constant
+		NOP
+		NOP
 
         ; Can't compare a 64 bit immediate, so we have to move them into a
         ; register.  Values of these immediates will be patched at runtime.
@@ -219,13 +242,19 @@ LEAF_ENTRY JIT_WriteBarrier_PostGrow32, _TEXT
         align 4
 		 mov     rax, rdx
 		xor     rax,rcx
-		bt      rax,42
-		jc	    MixedArenaGC4
-	    bt      rcx,42
-		jnc      NotMixedArenaGC4
+				mov   r10,1
+		shl   r10,42
+		test   rax, r10
+		jnz    MixedArenaGC4
+;		bt      rax,42
+;		jc	    MixedArenaGC4
+		test   rcx, r10
+		jz   NotMixedArenaGC4
+;	    bt      rcx,42
+;		jnc      NotMixedArenaGC4
 		shr     rax,32
 		and      eax,3ffh
-		jbe      MixedArenaGC4
+		jne      MixedArenaGC4
 
 NotMixedArenaGC4:
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
@@ -234,7 +263,7 @@ NotMixedArenaGC4:
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
         mov     [rcx], rdx
 
-        NOP_2_BYTE ; padding for alignment of constant
+        ;NOP_3_BYTE ; padding for alignment of constant
 
         ; Check the lower and upper ephemeral region bounds
 
@@ -285,10 +314,16 @@ LEAF_ENTRY JIT_WriteBarrier_SVR32, _TEXT
 
 		 mov     rax, rdx
 		xor     rax,rcx
-		bt      rax,42
-		jc	    MixedArenaGC5
-	    bt      rcx,42
-		jnc      NotMixedArenaGC5
+		mov   r10,1
+		shl   r10,42
+		test   rax, r10
+		jnz    MixedArenaGC5
+;		bt      rax,42
+;		jc	    MixedArenaGC5
+		test   rcx, r10
+		jz   NotMixedArenaGC5
+;	    bt      rcx,42
+;		jnc      NotMixedArenaGC5
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC5
@@ -302,7 +337,7 @@ NotMixedArenaGC5:
 
         shr     rcx, 0Bh
 
-        NOP_3_BYTE ; padding for alignment of constant
+        NOP ; padding for alignment of constant
 
 PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_CheckCardTable
         cmp     byte ptr [rcx + 0F0F0F0F0h], 0FFh
@@ -334,10 +369,16 @@ LEAF_ENTRY JIT_WriteBarrier_SVR64, _TEXT
         ;
 		 mov     rax, rdx
 		xor     rax,rcx
-		bt      rax,42
-		jc	    MixedArenaGC6
-	    bt      rcx,42
-		jnc      NotMixedArenaGC6
+		mov   r10,1
+		shl   r10,42
+		test   rax, r10
+		jnz    MixedArenaGC6
+;		bt      rax,42
+;		jc	    MixedArenaGC6
+		test   rcx, r10
+		jz   NotMixedArenaGC6
+;	    bt      rcx,42
+;		jnc      NotMixedArenaGC6
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC6
@@ -350,6 +391,8 @@ NotMixedArenaGC6:
         mov     [rcx], rdx
 
         NOP_3_BYTE ; padding for alignment of constant
+		NOP
+		NOP
 
 PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
         mov     rax, 0F0F0F0F0F0F0F0F0h

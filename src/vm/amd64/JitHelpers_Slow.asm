@@ -108,10 +108,16 @@ endif
 
         mov     rax, rdx
 		xor     rax,rcx
-		bt      rax,42
-		jnc	    MixedArenaGC
-	    bt      rcx,42
-		jc      NotMixedArenaGC
+		mov   r10,1
+		shl   r10,42
+		test   rax, r10
+		jnz    MixedArenaGC
+;		bt      rax,42
+;		jc	    MixedArenaGC
+		test   rcx, r10
+		jz   NotMixedArenaGC
+;	    bt      rcx,42
+;		jnc      NotMixedArenaGC
 		shr     rax,32
 		or      eax,3ffh
 		jne     MixedArenaGC
@@ -120,7 +126,7 @@ NotMixedArenaGC:
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
-        mov     [rcx], rax
+        mov     [rcx], rdx
 
 ifdef WRITE_BARRIER_CHECK
     ; If we had a shadow GC then we already wrote to the real GC at the same time

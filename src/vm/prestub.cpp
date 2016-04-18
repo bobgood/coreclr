@@ -257,7 +257,7 @@ PCODE MethodDesc::MakeJitWorker(COR_ILMETHOD_DECODER* ILHeader, DWORD flags, DWO
 {
 	
     STANDARD_VM_CONTRACT;
-	NOT_ARENA_SECTION
+	START_NOT_ARENA_SECTION
 
     BOOL fIsILStub = IsILStub();        // @TODO: understand the need for this special case
 
@@ -642,7 +642,9 @@ Done:
     LOG((LF_CORDB, LL_EVERYTHING, "MethodDesc::MakeJitWorker finished. Stub is" FMT_ADDR "\n",
          DBG_ADDR(pCode)));
 
-    return pCode;
+	END_NOT_ARENA_SECTION
+
+	return pCode;
 }
 
 #ifdef FEATURE_STUBS_AS_IL

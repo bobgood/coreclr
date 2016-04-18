@@ -452,6 +452,9 @@ LEAF_ENTRY JIT_PatchedCodeStart, _TEXT
         ret
 LEAF_END JIT_PatchedCodeStart, _TEXT
 
+; Min amount of stack space that a nested function should allocate.
+MIN_SIZE equ 28h
+E_ACCESSDENIED equ 80070005h
 
 ; This is used by the mechanism to hold either the JIT_WriteBarrier_PreGrow 
 ; or JIT_WriteBarrier_PostGrow code (depending on the state of the GC). It _WILL_
@@ -465,6 +468,23 @@ ifdef _DEBUG
         ; In debug builds, this just contains jump to the debug version of the write barrier by default
         jmp     JIT_WriteBarrier_Debug
 endif
+		mov     rax, rdx
+		xor     rax,rcx
+		mov     r10d,1
+		shl     r10,42
+		test    rax, r10
+		jnz     MixedArenaGC0
+;		bt      rax,42
+;		jc	    MixedArenaGC0
+		test   rcx, r10
+		jz   NotMixedArenaGC0
+;	    bt      rcx,42
+;		jnc      NotMixedArenaGC0
+		shr     rax,32
+		and      eax,3ffh
+		jne      MixedArenaGC0
+ 
+NotMixedArenaGC0:
 
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
@@ -472,7 +492,7 @@ endif
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
         mov     [rcx], rdx
 
-        NOP_3_BYTE ; padding for alignment of constant
+        NOP_3_BYTE ; padding for alignment of constant 
 
         ; Can't compare a 64 bit immediate, so we have to move them into a
         ; register.  Values of these immediates will be patched at runtime.
@@ -506,6 +526,12 @@ endif
     UpdateCardTable:
         mov     byte ptr [rcx + rax], 0FFh
         ret
+MixedArenaGC0:
+		mov     rcx, E_ACCESSDENIED ; access denied 
+        add     rsp, MIN_SIZE
+        ; void JIT_InternalThrow(unsigned exceptNum)
+        jmp     JIT_InternalThrow  
+
 
     align 16
     Exit:

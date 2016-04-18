@@ -90,19 +90,6 @@ public:
 
 #define ISARENA(x) ::ArenaControl::IsArenaAddress(x)
 
-class GCSection
-{
-public:
-	GCSection()
-	{
-		::ArenaControl::PushGC();
-	}
 
-	~GCSection()
-	{
-		::ArenaControl::Pop();
-	}
-};
-
-// use this declaration to disallow arena allocations until the scope containing this declaration expires.
-#define NOT_ARENA_SECTION GCSection tmp_GCSection;
+#define START_NOT_ARENA_SECTION ::ArenaControl::PushGC();
+#define END_NOT_ARENA_SECTION ::ArenaControl::Pop();
