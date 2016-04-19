@@ -119,8 +119,11 @@ endif
 ;	    bt      rcx,42
 ;		jnc      NotMixedArenaGC
 		shr     rax,32
-		or      eax,3ffh
+		and      eax,3ffh
 		jne     MixedArenaGC
+		mov     [rcx], rdx
+		ret
+
 NotMixedArenaGC:
         ; Do the move. It is correct to possibly take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back

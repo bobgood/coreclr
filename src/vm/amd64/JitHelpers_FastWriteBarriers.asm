@@ -65,6 +65,9 @@ LEAF_ENTRY JIT_WriteBarrier_PreGrow32, _TEXT
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC
+		; valid arena write barrier
+		mov     [rcx], rdx
+		ret
 NotMixedArenaGC:
         mov     [rcx], rdx
 
@@ -88,6 +91,8 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
 	MixedArenaGC:
+	mov     [rcx], rdx
+
 		mov     rcx, E_ACCESSDENIED ; access denied 
         add     rsp, MIN_SIZE
         ; void JIT_InternalThrow(unsigned exceptNum)
@@ -120,13 +125,13 @@ LEAF_ENTRY JIT_WriteBarrier_PreGrow64, _TEXT
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC2
+		; valid arena write barrier
+		mov     [rcx], rdx
+		ret
  
 NotMixedArenaGC2:
         mov     [rcx], rdx
-
-         NOP_3_BYTE ; padding for alignment of constant
          NOP; padding for alignment of constant
-		 NOP;
 
         ; Can't compare a 64 bit immediate, so we have to move it into a
         ; register.  Value of this immediate will be patched at runtime.
@@ -152,10 +157,12 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow64_Patch_Label_CardTable
         mov     byte ptr [rcx + rax], 0FFh
         ret
 MixedArenaGC2:
+mov     [rcx], rdx
+
 		mov     rcx, E_ACCESSDENIED ; access denied 
         add     rsp, MIN_SIZE
         ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow  
+        jmp     JIT_InternalThrow
 
     align 16
     Exit:
@@ -181,6 +188,9 @@ LEAF_ENTRY JIT_WriteBarrier_PostGrow64, _TEXT
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC3
+		; valid arena write barrier
+		mov     [rcx], rdx
+		ret
 NotMixedArenaGC3:
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
@@ -188,9 +198,7 @@ NotMixedArenaGC3:
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
         mov     [rcx], rdx
 
-        NOP_3_BYTE ; padding for alignment of constant
-		NOP
-		NOP
+		NOP ; padding for alignment of constant
 
         ; Can't compare a 64 bit immediate, so we have to move them into a
         ; register.  Values of these immediates will be patched at runtime.
@@ -228,6 +236,8 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow64_Patch_Label_CardTable
         ret
 
 MixedArenaGC3:
+mov     [rcx], rdx
+
 		mov     rcx, E_ACCESSDENIED ; access denied 
         add     rsp, MIN_SIZE
         ; void JIT_InternalThrow(unsigned exceptNum)
@@ -255,7 +265,9 @@ LEAF_ENTRY JIT_WriteBarrier_PostGrow32, _TEXT
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC4
-
+		; valid arena write barrier
+		mov     [rcx], rdx
+		ret
 NotMixedArenaGC4:
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
@@ -292,6 +304,8 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow32_PatchLabel_UpdateCardTable
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
 MixedArenaGC4:
+mov     [rcx], rdx
+
 		mov     rcx, E_ACCESSDENIED ; access denied 
         add     rsp, MIN_SIZE
         ; void JIT_InternalThrow(unsigned exceptNum)
@@ -327,6 +341,9 @@ LEAF_ENTRY JIT_WriteBarrier_SVR32, _TEXT
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC5
+		; valid arena write barrier
+		mov     [rcx], rdx
+		ret
 
 NotMixedArenaGC5:
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
@@ -352,6 +369,8 @@ PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_UpdateCardTable
         ret
 
 MixedArenaGC5:
+mov     [rcx], rdx
+
 		mov     rcx, E_ACCESSDENIED ; access denied 
         add     rsp, MIN_SIZE
         ; void JIT_InternalThrow(unsigned exceptNum)
@@ -382,6 +401,9 @@ LEAF_ENTRY JIT_WriteBarrier_SVR64, _TEXT
 		shr     rax,32
 		and      eax,3ffh
 		jne      MixedArenaGC6
+		; valid arena write barrier
+		mov     [rcx], rdx
+		ret
 
 NotMixedArenaGC6:
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
@@ -390,9 +412,7 @@ NotMixedArenaGC6:
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
         mov     [rcx], rdx
 
-        NOP_3_BYTE ; padding for alignment of constant
-		NOP
-		NOP
+		NOP ; padding for alignment of constant
 
 PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
         mov     rax, 0F0F0F0F0F0F0F0F0h
@@ -408,10 +428,13 @@ PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
         ret
 
 MixedArenaGC6:
+mov     [rcx], rdx
+
 		mov     rcx, E_ACCESSDENIED ; access denied 
         add     rsp, MIN_SIZE
         ; void JIT_InternalThrow(unsigned exceptNum)
         jmp     JIT_InternalThrow
+		ret
 LEAF_END_MARKED JIT_WriteBarrier_SVR64, _TEXT
 
         end

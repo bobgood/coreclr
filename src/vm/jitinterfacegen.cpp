@@ -200,6 +200,7 @@ void InitJITHelpers1()
 
     g_WriteBarrierManager.Initialize();
 
+#if 0
 #ifndef FEATURE_IMPLICIT_TLS
     if (gThreadTLSIndex < TLS_MINIMUM_AVAILABLE)
     {
@@ -295,6 +296,8 @@ void InitJITHelpers1()
         SetJitHelperFunction(CORINFO_HELP_GETSHARED_NONGCSTATIC_BASE_NOCTOR,JIT_GetSharedNonGCStaticBaseNoCtor_Slow);
     }
 #endif // !FEATURE_IMPLICIT_TLS
+#endif // 0
+
 #endif // _TARGET_AMD64_
 }
 

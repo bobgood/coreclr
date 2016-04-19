@@ -2882,20 +2882,24 @@ HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
 		void* p = ::ArenaControl::Allocate(size);
 		if (p != nullptr)
 		{
-			::ArenaControl::Log("JIT_NewS_MP_FastPortable arena",size);
+			::ArenaControl::Log("JIT_NewS_MP_FastPortable arena",(size_t)p);
 		}
+		else {
 
-        alloc_context *allocContext = thread->GetAllocContext();
-        BYTE *allocPtr = allocContext->alloc_ptr;
-        _ASSERTE(allocPtr <= allocContext->alloc_limit);
-        if (size > static_cast<SIZE_T>(allocContext->alloc_limit - allocPtr))
-        {
-            break;
-        }
-        allocContext->alloc_ptr = allocPtr + size;
+			alloc_context *allocContext = thread->GetAllocContext();
+			BYTE *allocPtr = allocContext->alloc_ptr;
+			_ASSERTE(allocPtr <= allocContext->alloc_limit);
+			if (size > static_cast<SIZE_T>(allocContext->alloc_limit - allocPtr))
+			{
+				break;
+			}
+			allocContext->alloc_ptr = allocPtr + size;
 
-        _ASSERTE(allocPtr != nullptr);
-        Object *object = reinterpret_cast<Object *>(allocPtr);
+			_ASSERTE(allocPtr != nullptr);
+			p = allocPtr;
+			::ArenaControl::Log("JIT_NewS_MP_FastPortable GC", (size_t)p);
+		}
+        Object *object = reinterpret_cast<Object *>(p);
         _ASSERTE(object->HasEmptySyncBlockInfo());
         object->SetMethodTable(methodTable);
 
@@ -3316,11 +3320,7 @@ HCIMPLEND
 HCIMPL2(Object*, JIT_NewArr1, CORINFO_CLASS_HANDLE arrayTypeHnd_, INT_PTR size)
 {
     FCALL_CONTRACT;
-	void* p = ::ArenaControl::Allocate(size);
-	if (p != nullptr)
-	{
-		::ArenaControl::Log("JIT_NewArr1 arena",size);
-	}
+	
 
     OBJECTREF newArray = NULL;
 
@@ -3381,8 +3381,7 @@ HCIMPL2(Object*, JIT_NewArr1, CORINFO_CLASS_HANDLE arrayTypeHnd_, INT_PTR size)
 
         if (g_pPredefinedArrayTypes[elemType] == NULL)
             g_pPredefinedArrayTypes[elemType] = pArrayClassRef;
-
-        newArray = FastAllocatePrimitiveArray(pArrayClassRef->GetMethodTable(), static_cast<DWORD>(size), bAllocateInLargeHeap);
+			newArray = FastAllocatePrimitiveArray(pArrayClassRef->GetMethodTable(), static_cast<DWORD>(size), bAllocateInLargeHeap);
     }
     else
     {

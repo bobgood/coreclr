@@ -217,8 +217,18 @@ void WriteBarrierManager::ChangeWriteBarrierTo(WriteBarrierType newWriteBarrier)
  
     // the memcpy must come before the switch statment because the asserts inside the switch 
     // are actually looking into the JIT_WriteBarrier buffer
+	auto p1 = (char*)GetCurrentWriteBarrierCode();
+		auto p2 = GetCurrentWriteBarrierSize();
+		auto p3 = (char*)JIT_WriteBarrier;
     memcpy((PVOID)JIT_WriteBarrier, (LPVOID)GetCurrentWriteBarrierCode(), GetCurrentWriteBarrierSize());
-    
+	for (int i = 0; i < p2; i++)
+	{
+		if (p1[i] != p3[i])
+		{
+			throw 0;
+		}
+	}
+
     switch (newWriteBarrier)
     {
         case WRITE_BARRIER_PREGROW32:

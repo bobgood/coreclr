@@ -525,6 +525,7 @@ inline BOOL ClrFlushInstructionCache(LPCVOID pCodeAddr, size_t sizeOfCode)
     return TRUE;
 }
 
+#if 0
 #ifndef FEATURE_IMPLICIT_TLS
 //
 // JIT HELPER ALIASING FOR PORTABILITY.
@@ -557,5 +558,6 @@ inline BOOL ClrFlushInstructionCache(LPCVOID pCodeAddr, size_t sizeOfCode)
 #define JIT_Stelem_Ref              JIT_Stelem_Ref
 
 #endif // FEATURE_PAL
+#endif
 
 #endif // __cgencpu_h__

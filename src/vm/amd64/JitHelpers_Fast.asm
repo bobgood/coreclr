@@ -482,8 +482,9 @@ endif
 ;		jnc      NotMixedArenaGC0
 		shr     rax,32
 		and      eax,3ffh
-		jne      MixedArenaGC0
- 
+		jne       MixedArenaGC0
+		 mov     [rcx], rdx
+		ret
 NotMixedArenaGC0:
 
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
@@ -526,11 +527,14 @@ NotMixedArenaGC0:
     UpdateCardTable:
         mov     byte ptr [rcx + rax], 0FFh
         ret
+
 MixedArenaGC0:
+		mov     [rcx], rdx
+
 		mov     rcx, E_ACCESSDENIED ; access denied 
         add     rsp, MIN_SIZE
         ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow  
+        jmp     JIT_InternalThrow
 
 
     align 16

@@ -102,7 +102,7 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers )
 	if (retVal != nullptr)
 	{
 
-		::ArenaControl::Log("AllocateObject arena", size);
+		::ArenaControl::Log("AllocateObject arena", (size_t)retVal);
 		return retVal;
 	}
 
@@ -114,6 +114,7 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers )
     else
         retVal = GCHeap::GetGCHeap()->Alloc(size, flags);
     END_INTERIOR_STACK_PROBE;
+	::ArenaControl::Log("AllocateObject GC", (size_t)retVal);
     return retVal;
 }
 
@@ -187,7 +188,7 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers )
 	if (retVal != nullptr)
 	{
 		
-		::ArenaControl::Log("AllocateObject arena", size);
+		::ArenaControl::Log("AllocateObject arena", (size_t)retVal);
 		return retVal;
 	}
 
@@ -197,6 +198,8 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers )
     INTERIOR_STACK_PROBE_FOR(GetThread(), static_cast<unsigned>(DEFAULT_ENTRY_PROBE_AMOUNT * 1.5));
     retVal = GCHeap::GetGCHeap()->AllocLHeap(size, flags);
     END_INTERIOR_STACK_PROBE;
+	::ArenaControl::Log("AllocateObject GC", (size_t)retVal);
+
     return retVal;
 }
 
@@ -421,7 +424,7 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	{
 		orArray->SetMethodTable(pArrayMT);
 		// Finalizers and Pointer flags sent to AllocHeap, etc appear not to be needed
-		::ArenaControl::Log("Allocating array", totalSize);
+		::ArenaControl::Log("Allocating arena array", (size_t)p);
 	} 
 	else if (bAllocateInLargeHeap)
     {
@@ -447,6 +450,8 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
         {
 			
             orArray = (ArrayBase *) Alloc(totalSize, FALSE, pArrayMT->ContainsPointers());
+			::ArenaControl::Log("Allocating GC array", (size_t)orArray);
+
         }
         orArray->SetMethodTable(pArrayMT);
     }
@@ -629,10 +634,17 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 
     ArrayBase* orObject;
 
+	void* p = ::ArenaControl::Allocate(totalSize);
+	if (p != nullptr)
+	{
+		::ArenaControl::Log("JIT_NewArr1 arena", (size_t)p);
+		orObject = (ArrayBase*)p;
+	}else
     if (bAllocateInLargeHeap)
     {
         orObject = (ArrayBase*) AllocLHeap(totalSize, FALSE, FALSE);
-    }
+		::ArenaControl::Log("JIT_NewArr1 gc", (size_t)orObject);
+	}
     else 
     {
         ArrayTypeDesc *pArrayR8TypeDesc = g_pPredefinedArrayTypes[ELEMENT_TYPE_R8];
@@ -1023,7 +1035,7 @@ OBJECTREF AllocateObject(MethodTable *pMT
 			if (p != nullptr)
 			{
 				orObject = (Object*)p;
-				::ArenaControl::Log("AllocateObject arena", pMT->GetBaseSize());
+				::ArenaControl::Log("AllocateObject arena", (size_t)p);
 			}
 			else
 			{
@@ -1031,6 +1043,7 @@ OBJECTREF AllocateObject(MethodTable *pMT
 				orObject = (Object *)Alloc(baseSize,
 					pMT->HasFinalizer(),
 					pMT->ContainsPointers());
+				::ArenaControl::Log("AllocateObject GC", (size_t)orObject);
 			}
         }
 

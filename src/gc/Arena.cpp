@@ -110,6 +110,7 @@ void _cdecl ArenaControl::SetAllocator(unsigned int type)
 void _cdecl ArenaControl::PushGC()
 {
 	if (ArenaControl::arenaStack == nullptr) return;
+	::ArenaControl::Log("Push");
 	arenaStack[arenaStackI++] = nullptr;
 	if (arenaStackI > 7) { Log("arenastack overflow"); }
 	arena = nullptr;
@@ -119,6 +120,7 @@ int Popcnt = 0;
 void _cdecl ArenaControl::Pop()
 {
 	if (ArenaControl::arenaStack == nullptr) return;
+	::ArenaControl::Log("Pop");
 	Popcnt++;
 	DeleteAllocator(arenaStack[--arenaStackI]);
 	arena = nullptr;
@@ -154,15 +156,18 @@ void* ArenaControl::Allocate(size_t jsize)
 	size_t size = Align(jsize);
 	return ((Arena*)arena)->Allocate(size);
 }
-
+int lcnt = 0;
 void ArenaControl::Log(char *str, size_t n)
 {
 	DWORD written;
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "Log ", (DWORD)strlen("Log "), &written, 0);
+	char bufn[25];
+	_itoa(lcnt++, bufn, 10);
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), " Log ", (DWORD)strlen(" Log "), &written, 0);
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), str, (DWORD)strlen(str), &written, 0);
 	if (n != 0)
 	{
-		char buf[14];
+		char buf[25];
 		buf[0] = ':'; buf[1] = ' ';
 		buf[2] = '0'; buf[3] = 'x';
 		_ui64toa(n, buf + 4, 16);
