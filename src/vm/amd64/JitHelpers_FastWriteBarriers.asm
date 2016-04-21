@@ -93,8 +93,8 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
 	MixedArenaGC:
+		mov rbx,rcx
         PUSH_CALLEE_SAVED_REGISTERS
-        movd                 xmm0, rcx
 
         alloc_stack         20h
 
@@ -104,8 +104,7 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
 
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		movd    rcx,xmm0
-		mov     [rcx], rax
+		mov     [rbx], rax
 		ret
 
     align 16
@@ -167,8 +166,8 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow64_Patch_Label_CardTable
         mov     byte ptr [rcx + rax], 0FFh
         ret
 MixedArenaGC2:
+		mov rbx,rcx
         PUSH_CALLEE_SAVED_REGISTERS
-        movd                xmm0, rcx
 
         alloc_stack         20h
 
@@ -178,8 +177,7 @@ MixedArenaGC2:
 
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		movd    rcx,xmm0
-		mov     [rcx], rax
+		mov     [rbx], rax
 		ret
 
     align 16
@@ -254,8 +252,8 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow64_Patch_Label_CardTable
         ret
 
 MixedArenaGC3:
+		mov rbx,rcx
         PUSH_CALLEE_SAVED_REGISTERS
-        movd                 xmm0, rcx
 
         alloc_stack         20h
 
@@ -265,8 +263,7 @@ MixedArenaGC3:
 
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-movd    rcx,xmm0
-		mov     [rcx], rax
+		mov     [rbx], rax
 		ret
 
 
@@ -331,8 +328,8 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow32_PatchLabel_UpdateCardTable
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
 MixedArenaGC4:
+		mov rbx,rcx
         PUSH_CALLEE_SAVED_REGISTERS
-        movd                 xmm0, rcx
 
         alloc_stack         20h
 
@@ -342,8 +339,7 @@ MixedArenaGC4:
 
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-movd    rcx,xmm0
-		mov     [rcx], rax
+		mov     [rbx], rax
 		ret
 
 
@@ -405,8 +401,8 @@ PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_UpdateCardTable
         ret
 
 MixedArenaGC5:
+		mov rbx,rcx
         PUSH_CALLEE_SAVED_REGISTERS
-        movd                 xmm0, rcx
 
         alloc_stack         20h
 
@@ -416,8 +412,7 @@ MixedArenaGC5:
 
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		movd    rcx,xmm0
-		mov     [rcx], rax
+		mov     [rbx], rax
 		ret
 
 
@@ -473,8 +468,8 @@ PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
         ret
 
 MixedArenaGC6:
+		mov rbx,rcx
         PUSH_CALLEE_SAVED_REGISTERS
-        movd                 xmm0, rcx
 
         alloc_stack         20h
 
@@ -484,8 +479,7 @@ MixedArenaGC6:
 
         add                 r10, 20h
         POP_CALLEE_SAVED_REGISTERS
-		movd    rcx,xmm0
-		mov     [rcx], rax
+		mov     [rbx], rax
 		ret
 
 NESTED_END_MARKED JIT_WriteBarrier_SVR64, _TEXT
