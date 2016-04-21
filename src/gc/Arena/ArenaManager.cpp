@@ -256,7 +256,7 @@ void ArenaManager::DeleteAllocator(void* vallocator)
 	Arena* allocator = static_cast<Arena*> (vallocator);
 
 	ReleaseId(Id(allocator));
-	delete allocator;
+	allocator->Destroy();
 	// dispose of clone cache items for disposed arena
 	for (int i = 0; i < maxArenas; i++)
 	{

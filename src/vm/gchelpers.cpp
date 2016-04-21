@@ -422,6 +422,7 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	void* p = ::ArenaManager::Allocate(totalSize);
 	if (p != nullptr)
 	{
+		orArray = (ArrayBase *)p;
 		orArray->SetMethodTable(pArrayMT);
 		// Finalizers and Pointer flags sent to AllocHeap, etc appear not to be needed
 		::ArenaManager::Log("Allocating arena array", (size_t)p);

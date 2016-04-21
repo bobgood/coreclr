@@ -157,6 +157,11 @@ namespace sfl
 			FreeBuffers();
 		}
 
+		void Destroy()
+		{
+			FreeBuffers();
+		}
+
 
 		// Free memory and recycle the arena so it can be reused
 		void Reset()
