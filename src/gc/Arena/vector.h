@@ -10,8 +10,10 @@ namespace sfl
 	template<class T>
 	class vector
 	{
-	public: 
+	public:
 		static const int fixedsize = 10;
+		// array is set to nullptr when fixed array is used, in order to support move semantics before much data
+		// is added, when move semantics would not update the pointer.
 		T* array;
 		// Prebuild space into the class so that the vector can be used before there is an allocator ready
 		T fixed[fixedsize];
@@ -24,11 +26,11 @@ namespace sfl
 		void* arenaAllocator;
 	public:
 		vector()
-			
+
 		{
 			arenaAllocator = nullptr;
 			reserved = fixedsize;
-			array = fixed;
+			array = nullptr;
 			isize = 0;
 		}
 
@@ -42,13 +44,12 @@ namespace sfl
 			arenaAllocator = a;
 		}
 
-		
-
 		void reserve(size_t n)
 		{
 			assert(arenaAllocator != nullptr);
-			
+
 			if (reserved > n) return;  // never shrink when arenas are involved
+			if (array == nullptr) array = fixed;
 			T* arr2 = (T*)RunAllocator(arenaAllocator, sizeof(T)*n);
 			memset(arr2, 0, sizeof(T)*n);
 			for (int i = 0; i < reserved; i++)
@@ -56,14 +57,14 @@ namespace sfl
 				arr2[i] = array[i];
 			}
 			reserved = n;
-			
+
 			array = arr2;
 
 		}
 
 		void resize(size_t n)
 		{
-			if (n > reserved) reserve(n*3/2);
+			if (n > reserved) reserve(n * 3 / 2);
 			isize = n;
 		}
 
@@ -93,13 +94,26 @@ namespace sfl
 			{
 				reserve(reserved < 10 ? 10 : reserved * 3 / 2);
 			}
-			array[isize++] = v;
+			if (array == nullptr)
+			{
+				fixed[isize++] = v;
+			}
+			else {
+				array[isize++] = v;
+			}
 		}
 
 		T& operator[](size_t n)
 		{
 			assert(n < isize);
-			return array[n];
+			if (array == nullptr)
+			{
+				return fixed[n];
+			}
+			else
+			{
+				return array[n];
+			}
 		}
 	};
 }

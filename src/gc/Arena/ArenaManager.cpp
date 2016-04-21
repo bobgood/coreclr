@@ -250,9 +250,11 @@ unsigned int ArenaManager::Id(void * allocator)
 
 void ArenaManager::DeleteAllocator(void* vallocator)
 {
+	if (vallocator == nullptr) return;
+
 	int id = Id(vallocator);
 	Arena* allocator = static_cast<Arena*> (vallocator);
-	if (allocator == nullptr) return;
+
 	ReleaseId(Id(allocator));
 	delete allocator;
 	// dispose of clone cache items for disposed arena
@@ -288,10 +290,12 @@ void* ArenaManager::Allocate(size_t jsize)
 		return nullptr;
 	}
 	size_t size = Align(jsize);
-	return ((Arena*)arena)->Allocate(size);
+	void*ret =  ((Arena*)arena)->Allocate(size);
+	memset(ret, 0, size);
+	return ret;
 }
 int lcnt = 0;
-void ArenaManager::Log(char *str, size_t n)
+void ArenaManager::Log(char *str, size_t n, size_t n2)
 {
 	DWORD written;
 	char bufn[25];
@@ -307,6 +311,15 @@ void ArenaManager::Log(char *str, size_t n)
 		_ui64toa(n, buf + 4, 16);
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, (DWORD)strlen(buf), &written, 0);
 	}
+	if (n2 != 0)
+	{
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), " -> ", (DWORD)strlen(" -> "), &written, 0);
+		char buf[25];
+		buf[0] = ':'; buf[1] = ' ';
+		buf[2] = '0'; buf[3] = 'x';
+		_ui64toa(n2, buf + 4, 16);
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, (DWORD)strlen(buf), &written, 0);
+	}
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "\n", (DWORD)strlen("\n"), &written, 0);
 }
 
@@ -314,7 +327,7 @@ alloc_context* GetThreadAllocContext();
 
 void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 {
-	ArenaManager::Log("ArenaMarshall", (size_t)vsrc);
+	ArenaManager::Log("ArenaMarshall", (size_t)vsrc, (size_t)vdst);
 
 	// src Allocator is not used
 	Arena* srcAllocator = (Arena*)AllocatorFromAddress(vsrc);
@@ -402,6 +415,7 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 		DWORD numInstanceFields = mt->GetNumInstanceFields();
 		if (numInstanceFields == 0) return p;
 		FieldDesc *pSrcFields = mt->GetApproxFieldDescListRaw();
+		if (pSrcFields == nullptr) return p;
 		for (DWORD i = 0; i < numInstanceFields; i++)
 		{
 			FieldDesc f = pSrcFields[i];
@@ -435,7 +449,7 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 
 			}
 		}
-	}
+	 }
 
 
 	return p;

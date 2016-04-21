@@ -8,7 +8,7 @@ namespace sfl
 {
 	class ArenaAllocator;
 }
-typedef sfl::ArenaAllocator Arena; 
+typedef sfl::ArenaAllocator Arena;
 class ObjectHashTable;
 class Object;
 
@@ -30,7 +30,7 @@ public:
 	static const size_t arenaBaseRequest = 1ULL << 42; // half of virtual address space reserved for arenas
 	static const size_t arenaRangeEnd = arenaBaseRequest + ((size_t)maxArenas << arenaAddressShift);
 
-													   // Minimum and maximum size of buffers allocated to arenas (each new buffer is twice the size of the prior)
+	// Minimum and maximum size of buffers allocated to arenas (each new buffer is twice the size of the prior)
 	static const size_t minBufferSize = 1ULL << 24;  //(16MB) min per arena
 	static const size_t maxBufferSize = (1ULL << (arenaAddressShift - 1));
 
@@ -99,7 +99,7 @@ public:
 	static void* Allocate(size_t jsize);
 
 	// Log method that writes to STD_OUTPUT
-	static void Log(char* str, size_t n=0);
+	static void Log(char* str, size_t n = 0, size_t n2 = 0);
 
 	// the current arena (or null).  Used by Masm code
 	static THREAD_LOCAL void* ArenaManager::arena;

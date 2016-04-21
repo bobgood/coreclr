@@ -532,9 +532,9 @@ NotMixedArenaGC0:
 
 MixedArenaGC0:
 
-		push                rax ; make room for the real return address (Rip)
+		
         PUSH_CALLEE_SAVED_REGISTERS
-        mov                 r10, rcx
+        movd                 xmm0, rcx
 
         alloc_stack         20h
 
@@ -543,9 +543,10 @@ MixedArenaGC0:
         call                ArenaMarshall
 
         add                 rsp, 20h
-		pop                 rax
+		
         POP_CALLEE_SAVED_REGISTERS
-		mov     [r10], rax
+		movd     rcx,xmm0
+		mov     [rcx], rax
 		ret
 
 
