@@ -63,6 +63,15 @@ public:
 		return SimpleHashTable::Find(Hash(key), found);
 	}
 
+	bool Set(const Object*key, Object*target)
+	{
+		sfl::lock_guard<sfl::critical_section> guard(m_lock);
+		Object*& slot = operator[](key);
+		if (slot != nullptr) return false;
+		slot = target;
+		return true;
+	}
+
 	// Delete the POD type value associated with a specific key from the
 	// hash table. If the key is not found, no operation is performed.
 		void Delete(Object* key)

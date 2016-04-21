@@ -3834,7 +3834,7 @@ class FrameWithCookieHolder
                 /* work around unreachable code warning */              \
                 if (true) { DEBUG_ASSURE_NO_RETURN_BEGIN(GCPROTECT)
 
-#define GCPROTECT_BEGININTERIOR(ObjRefStruct)   START_NOT_ARENA_SECTION        do {            \
+#define GCPROTECT_BEGININTERIOR(ObjRefStruct)   /*START_NOT_ARENA_SECTION*/        do {            \
                 FrameWithCookie<GCFrame> __gcframe(                     \
                         (OBJECTREF*)&(ObjRefStruct),                    \
                         sizeof(ObjRefStruct)/sizeof(OBJECTREF),         \
@@ -3842,7 +3842,7 @@ class FrameWithCookieHolder
                 /* work around unreachable code warning */              \
                 if (true) { DEBUG_ASSURE_NO_RETURN_BEGIN(GCPROTECT)
 
-#define GCPROTECT_BEGININTERIOR_ARRAY(ObjRefArray,cnt) START_NOT_ARENA_SECTION do {             \
+#define GCPROTECT_BEGININTERIOR_ARRAY(ObjRefArray,cnt) /*START_NOT_ARENA_SECTION*/ do {             \
                 FrameWithCookie<GCFrame> __gcframe(                     \
                         (OBJECTREF*)&(ObjRefArray),                     \
                         cnt,                                            \
@@ -3851,7 +3851,7 @@ class FrameWithCookieHolder
                 if (true) { DEBUG_ASSURE_NO_RETURN_BEGIN(GCPROTECT)
 
 
-#define GCPROTECT_END()         END_NOT_ARENA_SECTION                                        \
+#define GCPROTECT_END()         /*END_NOT_ARENA_SECTION*/                                        \
                 DEBUG_ASSURE_NO_RETURN_END(GCPROTECT) }                 \
                 __gcframe.Pop(); } while(0)
 

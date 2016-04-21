@@ -2,12 +2,15 @@
 #pragma once
 
 #include <vcruntime.h>
+
 #define THREAD_LOCAL thread_local
 namespace sfl
 {
 	class ArenaAllocator;
 }
 typedef sfl::ArenaAllocator Arena; 
+class ObjectHashTable;
+class Object;
 
 class ArenaManager
 {
@@ -55,6 +58,14 @@ private:
 
 	// Converts an arena ID into a base address in virtual address space.
 	static size_t IdToAddress(int id);
+
+	static ObjectHashTable& FindCloneTable(void* src, void* target);
+
+	// FindClone and SetClone do not work if an object is relocated in GC.  Not sure if we can subscribe to GC to find pointers that have moved or expired.
+	static Object* FindClone(void* src, void* target);
+
+	// thread safe - returns false if the value was already set
+	static bool SetClone(void* src, void* target);
 
 private:
 	// Deletes an Arena and releases all its memory.

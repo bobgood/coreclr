@@ -177,6 +177,66 @@ void _cdecl ArenaManager::Pop()
 		arena = arenaStack[arenaStackI - 1];
 	}
 }
+ObjectHashTable& ArenaManager::FindCloneTable(void* src, void* target)
+{
+	// There needs to be a hashtable that keeps track of every clone that occurs between each pair of allocators.
+	// the hash table is always stored in the arena with the highest address.  So each hashtable contains both the
+	// clones from A to B and also the clones from B to A.
+	// one of the two allocators may be the GC allocator, but these objects will always have the lowest address, so the
+	// hash table will still be built into an arena allocators header.
+	// each header contains an array with entries for the maximum number of allowed arenas. 
+	// example:  If a clone from arena 3 was made in arena 8, then slot #3 in in the header for arena 8 contains all
+	// clones made from 8 to 3 and from 3 to 8.
+	// Whenever a clone is made from (or to) the GC for example to arena 22, there is no slot number for the GC, so
+	// slot 22 in arena 22 is reserved for cloning between 22 and the GC.
+	//
+	// If an allocator 17 is deleted, all of his clone hash tables will be deleted.  We also need to go through all of the other
+	// arena headers, and delete the table in slot 17 for each one.  (deleting an object in an arena simply means setting the pointer
+	// to zero.)
+	//
+	// Clone tables are necessary to make sure the same object is not cloned repeatedly, and that linked objects will have the links go
+	// to a single clone, rather than create bugs by having different links go to different clones.
+
+	// master is the allocator that will hold the clone table for this pair of addresss.  
+	// The target address can be any address in the range covered by the allocator when checking for a clone,
+	// but once found in the clone table, the target address is the address of the clone for the target allocator.
+	void *master = (src < target) ? target : src;
+	void *slave = (src > target) ? target : src;
+	if (slave < (void*)arenaBaseRequest)
+	{
+		slave = master;
+	}
+	int id = Id(slave);
+
+
+	auto header = GetHeaderFromAddress(master);
+	if (header.clones[id] == nullptr)
+	{
+		header.clones[id] = ObjectHashTable::Create(header.m_arena);
+	}
+	return *header.clones[id];
+}
+
+ Object* ArenaManager::FindClone(void* src, void* target)
+{
+	auto cloneTable = FindCloneTable(src, target);
+	bool found;
+	Object* clone = cloneTable.Find((Object*)src, found);
+	if (found)
+	{
+		return clone;
+	}
+	else
+	{
+		return nullptr;
+	}
+}
+
+bool ArenaManager::SetClone(void* src, void* target)
+{
+	auto cloneTable = FindCloneTable(src, target);
+	return cloneTable.Set((Object*)src, (Object*)target);
+}
 
 void* ArenaManager::GetArena()
 {
@@ -190,10 +250,21 @@ unsigned int ArenaManager::Id(void * allocator)
 
 void ArenaManager::DeleteAllocator(void* vallocator)
 {
+	int id = Id(vallocator);
 	Arena* allocator = static_cast<Arena*> (vallocator);
 	if (allocator == nullptr) return;
 	ReleaseId(Id(allocator));
 	delete allocator;
+	// dispose of clone cache items for disposed arena
+	for (int i = 0; i < maxArenas; i++)
+	{
+		Arena* a = (Arena*) arenaById[i];
+		if (a != nullptr)
+		{
+			ArenaHeader* h = (ArenaHeader*)a;
+			h->clones[id] = nullptr;
+		}	
+	}
 }
 
 inline
