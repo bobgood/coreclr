@@ -26,7 +26,6 @@
 #include "eventtrace.h"
 #include "constrainedexecutionregion.h"
 #include "array.h"
-#include "..\gc\Arena.h"
 #include "compile.h"
 #include "ecall.h"
 #include "virtualcallstub.h"

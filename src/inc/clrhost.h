@@ -13,6 +13,7 @@
 #ifdef CreateSemaphore
 #undef CreateSemaphore
 #endif
+#include "debugmacros.h"
 #include "mscoree.h"
 #include "clrinternal.h"
 #include "switches.h"

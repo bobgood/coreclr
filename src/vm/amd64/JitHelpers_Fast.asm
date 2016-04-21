@@ -47,6 +47,8 @@ extern JITutil_ChkCastInterface:proc
 extern JITutil_IsInstanceOfInterface:proc
 extern JITutil_ChkCastAny:proc
 extern JITutil_IsInstanceOfAny:proc
+ArenaMarshall equ ?ArenaMarshall@ArenaManager@@SAPEAXPEAX0@Z
+extern ArenaMarshall:proc
 
 ;EXTERN_C Object* JIT_IsInstanceOfClass(MethodTable* pMT, Object* pObject);
 LEAF_ENTRY JIT_IsInstanceOfClass, _TEXT
@@ -454,14 +456,14 @@ LEAF_END JIT_PatchedCodeStart, _TEXT
 
 ; Min amount of stack space that a nested function should allocate.
 MIN_SIZE equ 28h
-E_ACCESSDENIED equ 80070005h
+
 
 ; This is used by the mechanism to hold either the JIT_WriteBarrier_PreGrow 
 ; or JIT_WriteBarrier_PostGrow code (depending on the state of the GC). It _WILL_
 ; change at runtime as the GC changes. Initially it should simply be a copy of the 
 ; larger of the two functions (JIT_WriteBarrier_PostGrow) to ensure we have created
 ; enough space to copy that code in.
-LEAF_ENTRY JIT_WriteBarrier, _TEXT
+NESTED_ENTRY JIT_WriteBarrier, _TEXT
         align 16
 
 ifdef _DEBUG
@@ -529,12 +531,22 @@ NotMixedArenaGC0:
         ret
 
 MixedArenaGC0:
-		mov     [rcx], rdx
 
-		mov     rcx, E_ACCESSDENIED ; access denied 
-        add     rsp, MIN_SIZE
-        ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow
+		push                rax ; make room for the real return address (Rip)
+        PUSH_CALLEE_SAVED_REGISTERS
+        mov                 r10, rcx
+
+        alloc_stack         20h
+
+        END_PROLOGUE
+    
+        call                ArenaMarshall
+
+        add                 rsp, 20h
+		pop                 rax
+        POP_CALLEE_SAVED_REGISTERS
+		mov     [r10], rax
+		ret
 
 
     align 16

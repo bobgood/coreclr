@@ -20,8 +20,10 @@ include AsmMacros.inc
 include asmconstants.inc
 
 extern JIT_InternalThrow:proc
+ArenaMarshall equ ?ArenaMarshall@ArenaManager@@SAPEAXPEAX0@Z
+extern ArenaMarshall:proc
 MIN_SIZE equ 28h
-E_ACCESSDENIED equ 80070005h
+
 
 ; Two super fast helpers that together do the work of JIT_WriteBarrier.  These
 ; use inlined ephemeral region bounds and an inlined pointer to the card table.
@@ -44,7 +46,7 @@ E_ACCESSDENIED equ 80070005h
 ; (card table, ephemeral region ranges, etc) are naturally aligned since
 ; there are codepaths that will overwrite these values while the EE is running.
 ;
-LEAF_ENTRY JIT_WriteBarrier_PreGrow32, _TEXT
+NESTED_ENTRY JIT_WriteBarrier_PreGrow32, _TEXT
         align 4
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
@@ -91,20 +93,27 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
 	MixedArenaGC:
-	mov     [rcx], rdx
+        PUSH_CALLEE_SAVED_REGISTERS
+        mov                 r10, rcx
 
-		mov     rcx, E_ACCESSDENIED ; access denied 
-        add     rsp, MIN_SIZE
-        ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow
+        alloc_stack         20h
+
+        END_PROLOGUE
+    
+        call                ArenaMarshall
+
+        add                 rsp, 20h
+        POP_CALLEE_SAVED_REGISTERS
+		mov     [r10], rax
+		ret
 
     align 16
     Exit:
         REPRET
-LEAF_END_MARKED JIT_WriteBarrier_PreGrow32, _TEXT
+NESTED_END_MARKED JIT_WriteBarrier_PreGrow32, _TEXT
 
 
-LEAF_ENTRY JIT_WriteBarrier_PreGrow64, _TEXT
+NESTED_ENTRY JIT_WriteBarrier_PreGrow64, _TEXT
         align 8
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
@@ -157,21 +166,28 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow64_Patch_Label_CardTable
         mov     byte ptr [rcx + rax], 0FFh
         ret
 MixedArenaGC2:
-mov     [rcx], rdx
+        PUSH_CALLEE_SAVED_REGISTERS
+        mov                 r10, rcx
 
-		mov     rcx, E_ACCESSDENIED ; access denied 
-        add     rsp, MIN_SIZE
-        ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow
+        alloc_stack         20h
+
+        END_PROLOGUE
+    
+        call                ArenaMarshall
+
+        add                 rsp, 20h
+        POP_CALLEE_SAVED_REGISTERS
+		mov     [r10], rax
+		ret
 
     align 16
     Exit:
         REPRET
-LEAF_END_MARKED JIT_WriteBarrier_PreGrow64, _TEXT
+NESTED_END_MARKED JIT_WriteBarrier_PreGrow64, _TEXT
 
 
 ; See comments for JIT_WriteBarrier_PreGrow (above).
-LEAF_ENTRY JIT_WriteBarrier_PostGrow64, _TEXT
+NESTED_ENTRY JIT_WriteBarrier_PostGrow64, _TEXT
         align 8
 		 mov     rax, rdx
 		xor     rax,rcx
@@ -236,19 +252,27 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow64_Patch_Label_CardTable
         ret
 
 MixedArenaGC3:
-mov     [rcx], rdx
+        PUSH_CALLEE_SAVED_REGISTERS
+        mov                 r10, rcx
 
-		mov     rcx, E_ACCESSDENIED ; access denied 
-        add     rsp, MIN_SIZE
-        ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow
+        alloc_stack         20h
+
+        END_PROLOGUE
+    
+        call                ArenaMarshall
+
+        add                 rsp, 20h
+        POP_CALLEE_SAVED_REGISTERS
+		mov     [r10], rax
+		ret
+
 
     align 16
     Exit:
         REPRET
-LEAF_END_MARKED JIT_WriteBarrier_PostGrow64, _TEXT
+NESTED_END_MARKED JIT_WriteBarrier_PostGrow64, _TEXT
 
-LEAF_ENTRY JIT_WriteBarrier_PostGrow32, _TEXT
+NESTED_ENTRY JIT_WriteBarrier_PostGrow32, _TEXT
         align 4
 		 mov     rax, rdx
 		xor     rax,rcx
@@ -304,20 +328,28 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow32_PatchLabel_UpdateCardTable
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
 MixedArenaGC4:
-mov     [rcx], rdx
+        PUSH_CALLEE_SAVED_REGISTERS
+        mov                 r10, rcx
 
-		mov     rcx, E_ACCESSDENIED ; access denied 
-        add     rsp, MIN_SIZE
-        ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow
+        alloc_stack         20h
+
+        END_PROLOGUE
+    
+        call                ArenaMarshall
+
+        add                 rsp, 20h
+        POP_CALLEE_SAVED_REGISTERS
+		mov     [r10], rax
+		ret
+
 
     align 16
     Exit:
         REPRET
-LEAF_END_MARKED JIT_WriteBarrier_PostGrow32, _TEXT
+NESTED_END_MARKED JIT_WriteBarrier_PostGrow32, _TEXT
 
 
-LEAF_ENTRY JIT_WriteBarrier_SVR32, _TEXT
+NESTED_ENTRY JIT_WriteBarrier_SVR32, _TEXT
         align 4
         ;
         ; SVR GC has multiple heaps, so it cannot provide one single 
@@ -369,16 +401,24 @@ PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_UpdateCardTable
         ret
 
 MixedArenaGC5:
-mov     [rcx], rdx
+        PUSH_CALLEE_SAVED_REGISTERS
+        mov                 r10, rcx
 
-		mov     rcx, E_ACCESSDENIED ; access denied 
-        add     rsp, MIN_SIZE
-        ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow
+        alloc_stack         20h
 
-LEAF_END_MARKED JIT_WriteBarrier_SVR32, _TEXT
+        END_PROLOGUE
+    
+        call                ArenaMarshall
 
-LEAF_ENTRY JIT_WriteBarrier_SVR64, _TEXT
+        add                 rsp, 20h
+        POP_CALLEE_SAVED_REGISTERS
+		mov     [rcx], rax
+		ret
+
+
+NESTED_END_MARKED JIT_WriteBarrier_SVR32, _TEXT
+
+NESTED_ENTRY JIT_WriteBarrier_SVR64, _TEXT
         align 8
         ;
         ; SVR GC has multiple heaps, so it cannot provide one single 
@@ -428,14 +468,21 @@ PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
         ret
 
 MixedArenaGC6:
-mov     [rcx], rdx
+        PUSH_CALLEE_SAVED_REGISTERS
+        mov                 r10, rcx
 
-		mov     rcx, E_ACCESSDENIED ; access denied 
-        add     rsp, MIN_SIZE
-        ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow
+        alloc_stack         20h
+
+        END_PROLOGUE
+    
+        call                ArenaMarshall
+
+        add                 r10, 20h
+        POP_CALLEE_SAVED_REGISTERS
+		mov     [rcx], rax
 		ret
-LEAF_END_MARKED JIT_WriteBarrier_SVR64, _TEXT
+
+NESTED_END_MARKED JIT_WriteBarrier_SVR64, _TEXT
 
         end
 

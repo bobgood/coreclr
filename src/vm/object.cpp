@@ -18,7 +18,6 @@
 #include "excep.h"
 #include "eeconfig.h"
 #include "gc.h"
-#include "arena.h"
 #ifdef FEATURE_REMOTING
 #include "remoting.h"
 #endif

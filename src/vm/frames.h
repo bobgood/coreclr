@@ -310,6 +310,7 @@ FRAME_TYPE_NAME(SecurityContextFrame)
 #include "gms.h"
 #include "threads.h"
 #include "callingconvention.h"
+#include "..\gc\Arena\ArenaManager.h"
 
 // Forward references
 class Frame;
@@ -3808,7 +3809,7 @@ class FrameWithCookieHolder
 #pragma warning(disable:6384)
 #endif /*_PREFAST_ */
 
-#define GCPROTECT_BEGIN(ObjRefStruct)                           do {    \
+#define GCPROTECT_BEGIN(ObjRefStruct)  /*START_NOT_ARENA_SECTION*/  do {    \
                 FrameWithCookie<GCFrame> __gcframe(                     \
                         (OBJECTREF*)&(ObjRefStruct),                    \
                         sizeof(ObjRefStruct)/sizeof(OBJECTREF),         \
@@ -3816,7 +3817,7 @@ class FrameWithCookieHolder
                 /* work around unreachable code warning */              \
                 if (true) { DEBUG_ASSURE_NO_RETURN_BEGIN(GCPROTECT)
 
-#define GCPROTECT_BEGIN_THREAD(pThread, ObjRefStruct)           do {    \
+#define GCPROTECT_BEGIN_THREAD(pThread, ObjRefStruct)   /*START_NOT_ARENA_SECTION */       do {    \
                 FrameWithCookie<GCFrame> __gcframe(                     \
                         pThread,                                        \
                         (OBJECTREF*)&(ObjRefStruct),                    \
@@ -3825,7 +3826,7 @@ class FrameWithCookieHolder
                 /* work around unreachable code warning */              \
                 if (true) { DEBUG_ASSURE_NO_RETURN_BEGIN(GCPROTECT)
 
-#define GCPROTECT_ARRAY_BEGIN(ObjRefArray,cnt) do {                     \
+#define GCPROTECT_ARRAY_BEGIN(ObjRefArray,cnt)  /*START_NOT_ARENA_SECTION*/ do {                     \
                 FrameWithCookie<GCFrame> __gcframe(                     \
                         (OBJECTREF*)&(ObjRefArray),                     \
                         cnt * sizeof(ObjRefArray) / sizeof(OBJECTREF),  \
@@ -3833,7 +3834,7 @@ class FrameWithCookieHolder
                 /* work around unreachable code warning */              \
                 if (true) { DEBUG_ASSURE_NO_RETURN_BEGIN(GCPROTECT)
 
-#define GCPROTECT_BEGININTERIOR(ObjRefStruct)           do {            \
+#define GCPROTECT_BEGININTERIOR(ObjRefStruct)   START_NOT_ARENA_SECTION        do {            \
                 FrameWithCookie<GCFrame> __gcframe(                     \
                         (OBJECTREF*)&(ObjRefStruct),                    \
                         sizeof(ObjRefStruct)/sizeof(OBJECTREF),         \
@@ -3841,7 +3842,7 @@ class FrameWithCookieHolder
                 /* work around unreachable code warning */              \
                 if (true) { DEBUG_ASSURE_NO_RETURN_BEGIN(GCPROTECT)
 
-#define GCPROTECT_BEGININTERIOR_ARRAY(ObjRefArray,cnt) do {             \
+#define GCPROTECT_BEGININTERIOR_ARRAY(ObjRefArray,cnt) START_NOT_ARENA_SECTION do {             \
                 FrameWithCookie<GCFrame> __gcframe(                     \
                         (OBJECTREF*)&(ObjRefArray),                     \
                         cnt,                                            \
@@ -3850,7 +3851,7 @@ class FrameWithCookieHolder
                 if (true) { DEBUG_ASSURE_NO_RETURN_BEGIN(GCPROTECT)
 
 
-#define GCPROTECT_END()                                                 \
+#define GCPROTECT_END()         END_NOT_ARENA_SECTION                                        \
                 DEBUG_ASSURE_NO_RETURN_END(GCPROTECT) }                 \
                 __gcframe.Pop(); } while(0)
 

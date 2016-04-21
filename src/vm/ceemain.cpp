@@ -132,7 +132,7 @@
 
 #include "common.h"
 // Hack
-#include "arena.h"
+#include "../gc/Arena/arenaManager.h"
 
 #include "vars.hpp"
 #include "log.h"
@@ -1241,7 +1241,7 @@ void EEStartupHelper(COINITIEE fFlags)
 #endif
 
 	InitializeGarbageCollector();
-	ArenaControl::InitArena();
+	ArenaManager::InitArena();
 	InitializePinHandleTable();
 
 #ifdef DEBUGGING_SUPPORTED

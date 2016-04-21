@@ -62,9 +62,6 @@ namespace sfl
 	class ArenaAllocator
 	{
 	public:
-		// Standard Library allocator adapter
-
-
 		// Configuration settings
 		struct Config
 		{
@@ -127,6 +124,7 @@ namespace sfl
 		static_assert(offsetof(Config, addr) == ArenaAllocator_Config_addr_Offset, "minBuffer offset is not 8");
 		static_assert(offsetof(Config, maxArenaAlloc) == ArenaAllocator_Config_maxArenaAlloc_Offset, "maxBuffer offset is not 0x10");
 
+
 		// c/dtor
 		ArenaAllocator(const Config& config = Config())
 			: m_config(config),
@@ -143,10 +141,14 @@ namespace sfl
 				size <<= 1;
 			}
 
-			// Reserve space in m_arenaBuffers vector
-			m_arenaBuffers.reserve(buffers);
-
 			AddBuffer();
+		}
+
+		void PropagateAllocators()
+		{
+			m_overflowBufferLengths.setAllocator(this);
+			m_arenaBuffers.setAllocator(this);
+			m_overflowBuffers.setAllocator(this);
 		}
 
 
@@ -442,15 +444,7 @@ namespace sfl
 
 		static_assert(offsetof(Block, bufferIndex) == ArenaAllocator_Block_bufferIndex_Offset, "bufferIndex offset is not 0");
 		static_assert(offsetof(Block, bufferOffset) == ArenaAllocator_Block_bufferOffset_Offset, "bufferOffset offset is not 4");
-		// If user tries to shoot himself in the foot and calls global operator
-		// delete() or free() on an arena allocated object, offsetting first
-		// allocation by a few bytes will make sure he doesn't miss. 
-		static const uint32_t initialOffset =
-#ifdef DEBUG
-			sizeof(void*);
-#else
-			0;
-#endif
+		static const uint32_t initialOffset = 0;
 
 		// the following fields are public only for MASM access
 		public:
@@ -493,3 +487,5 @@ namespace sfl
 
 
 }; // namespace sfl
+
+typedef sfl::ArenaAllocator Arena;

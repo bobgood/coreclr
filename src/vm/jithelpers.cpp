@@ -24,7 +24,7 @@
 #include "securitymeta.h"
 #include "dllimport.h"
 #include "gc.h"
-#include "arena.h"
+#include "../gc/Arena/arenaManager.h"
 #include "comdelegate.h"
 #include "jitperf.h" // to track jit perf
 #include "corprof.h"
@@ -1545,7 +1545,6 @@ HCIMPLEND
 HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Helper, DomainLocalModule *pLocalModule, DWORD dwClassDomainID)
 {
     FCALL_CONTRACT;
-	START_NOT_ARENA_SECTION
     HELPER_METHOD_FRAME_BEGIN_RET_0();
     
     // Obtain Method table
@@ -1556,7 +1555,6 @@ HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Helper, DomainLocalModule *pLocalMod
     HELPER_METHOD_FRAME_END();
     
     auto r= (void*)pLocalModule->GetPrecomputedNonGCStaticsBasePointer();
-	END_NOT_ARENA_SECTION
 		return r;
 }
 HCIMPLEND
@@ -1564,7 +1562,6 @@ HCIMPLEND
 HCIMPL2(void*, JIT_GetSharedGCStaticBase_Helper, DomainLocalModule *pLocalModule, DWORD dwClassDomainID)
 {
     FCALL_CONTRACT;
-	START_NOT_ARENA_SECTION
     HELPER_METHOD_FRAME_BEGIN_RET_0();
     
     // Obtain Method table
@@ -1575,7 +1572,6 @@ HCIMPL2(void*, JIT_GetSharedGCStaticBase_Helper, DomainLocalModule *pLocalModule
     HELPER_METHOD_FRAME_END();
 
 	auto r = (void*)pLocalModule->GetPrecomputedGCStaticsBasePointer();
-	END_NOT_ARENA_SECTION
 		return r;
 }
 HCIMPLEND
@@ -2879,10 +2875,10 @@ HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
         SIZE_T size = methodTable->GetBaseSize();
         _ASSERTE(size % DATA_ALIGNMENT == 0);
 		
-		void* p = ::ArenaControl::Allocate(size);
+		void* p = ::ArenaManager::Allocate(size);
 		if (p != nullptr)
 		{
-			::ArenaControl::Log("JIT_NewS_MP_FastPortable arena",(size_t)p);
+			::ArenaManager::Log("JIT_NewS_MP_FastPortable arena",(size_t)p);
 		}
 		else {
 
@@ -2897,7 +2893,7 @@ HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
 
 			_ASSERTE(allocPtr != nullptr);
 			p = allocPtr;
-			::ArenaControl::Log("JIT_NewS_MP_FastPortable GC", (size_t)p);
+			::ArenaManager::Log("JIT_NewS_MP_FastPortable GC", (size_t)p);
 		}
         Object *object = reinterpret_cast<Object *>(p);
         _ASSERTE(object->HasEmptySyncBlockInfo());
@@ -3405,7 +3401,7 @@ HCIMPLEND
 */
 OBJECTREF allocNewMDArr(TypeHandle typeHnd, unsigned dwNumArgs, va_list args)
 {
-	::ArenaControl::Log("Enter allocNewMDArr", dwNumArgs);
+	::ArenaManager::Log("Enter allocNewMDArr", dwNumArgs);
     CONTRACTL {
         THROWS;
         GC_TRIGGERS;
@@ -3447,7 +3443,7 @@ OBJECTREF allocNewMDArr(TypeHandle typeHnd, unsigned dwNumArgs, va_list args)
 
 HCIMPL2VA(Object*, JIT_NewMDArr, CORINFO_CLASS_HANDLE classHnd, unsigned dwNumArgs)
 {
-	::ArenaControl::Log("Entered JIT_NewMDArr");
+	::ArenaManager::Log("Entered JIT_NewMDArr");
     FCALL_CONTRACT;
 
     OBJECTREF    ret = 0;

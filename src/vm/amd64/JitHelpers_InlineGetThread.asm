@@ -37,7 +37,7 @@ JIT_Box                 equ     ?JIT_Box@@YAPEAVObject@@PEAUCORINFO_CLASS_STRUCT
 g_pStringClass          equ     ?g_pStringClass@@3PEAVMethodTable@@EA
 FramedAllocateString    equ     ?FramedAllocateString@@YAPEAVStringObject@@K@Z
 JIT_NewArr1             equ     ?JIT_NewArr1@@YAPEAVObject@@PEAUCORINFO_CLASS_STRUCT_@@_J@Z
-ArenaControl_arena      equ     ?arena@ArenaControl@@2PEAXEA
+ArenaControl_arena      equ     ?arena@ArenaManager@@2PEAXEA
 INVALIDGCVALUE          equ     0CCCCCCCDh
 
 ; These should be in AsmConstants.inc, but I could not figure out how...

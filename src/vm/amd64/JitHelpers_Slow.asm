@@ -21,7 +21,7 @@ include asmconstants.inc
 
 ; Min amount of stack space that a nested function should allocate.
 MIN_SIZE equ 28h
-E_ACCESSDENIED equ 80070005h
+
 
 EXTERN  g_ephemeral_low:QWORD
 EXTERN  g_ephemeral_high:QWORD
@@ -58,14 +58,15 @@ extern JIT_GetSharedNonGCStaticBase_Helper:proc
 extern JIT_GetSharedGCStaticBase_Helper:proc
 
 extern JIT_InternalThrow:proc
-
+ArenaMarshall equ ?ArenaMarshall@ArenaManager@@SAPEAXPEAX0@Z
+extern ArenaMarshall:proc
 
 ifdef _DEBUG
 ; Version for when we're sure to be in the GC, checks whether or not the card
 ; needs to be updated
 ;
 ; void JIT_WriteBarrier_Debug(Object** dst, Object* src)
-LEAF_ENTRY JIT_WriteBarrier_Debug, _TEXT
+NESTED_ENTRY JIT_WriteBarrier_Debug, _TEXT
 
 ifdef WRITE_BARRIER_CHECK
         ; **ALSO update the shadow GC heap if that is enabled**
@@ -158,15 +159,28 @@ endif
         ret
 
 	MixedArenaGC:
-		mov     rcx, 80070005h ; access denied 
-        add     rsp, MIN_SIZE
-        ; void JIT_InternalThrow(unsigned exceptNum)
-        jmp     JIT_InternalThrow
+        PUSH_CALLEE_SAVED_REGISTERS
+        push rcx
+
+        alloc_stack         20h
+
+        END_PROLOGUE
+    
+        call                ArenaMarshall
+
+        add                 rsp, 20h
+
+		pop rcx
+        POP_CALLEE_SAVED_REGISTERS
+		
+		mov     [rcx], rax
+		ret
+
 
     align 16
     Exit:
         REPRET
-LEAF_END_MARKED JIT_WriteBarrier_Debug, _TEXT
+NESTED_END_MARKED JIT_WriteBarrier_Debug, _TEXT
 endif
 
 NESTED_ENTRY JIT_TrialAllocSFastMP, _TEXT

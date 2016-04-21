@@ -17,7 +17,7 @@
 #include "eetwain.h"
 #include "eeconfig.h"
 #include "gc.h"
-#include "arena.h"
+#include "..\gc\Arena\arenaManager.h"
 #include "corhost.h"
 #include "threads.h"
 #include "fieldmarshaler.h"
@@ -98,11 +98,11 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers )
                    (bFinalize ? GC_ALLOC_FINALIZE : 0));
 
     Object *retVal = NULL;
-	retVal = (Object *)::ArenaControl::Allocate(size);
+	retVal = (Object *)::ArenaManager::Allocate(size);
 	if (retVal != nullptr)
 	{
 
-		::ArenaControl::Log("AllocateObject arena", (size_t)retVal);
+		::ArenaManager::Log("AllocateObject arena", (size_t)retVal);
 		return retVal;
 	}
 
@@ -114,7 +114,7 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers )
     else
         retVal = GCHeap::GetGCHeap()->Alloc(size, flags);
     END_INTERIOR_STACK_PROBE;
-	::ArenaControl::Log("AllocateObject GC", (size_t)retVal);
+	::ArenaManager::Log("AllocateObject GC", (size_t)retVal);
     return retVal;
 }
 
@@ -134,11 +134,11 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
                    (bAlignBias ? GC_ALLOC_ALIGN8_BIAS : 0));
 
     Object *retVal = NULL;
-	retVal = (Object *)::ArenaControl::Allocate(size);
+	retVal = (Object *)::ArenaManager::Allocate(size);
 	if (retVal != nullptr)
 	{
 
-		::ArenaControl::Log("AllocateObject arena", size);
+		::ArenaManager::Log("AllocateObject arena", size);
 		return retVal;
 	}
 
@@ -184,11 +184,11 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers )
                    (bFinalize ? GC_ALLOC_FINALIZE : 0));
 
     Object *retVal = NULL;
-	retVal = (Object *)::ArenaControl::Allocate(size);
+	retVal = (Object *)::ArenaManager::Allocate(size);
 	if (retVal != nullptr)
 	{
 		
-		::ArenaControl::Log("AllocateObject arena", (size_t)retVal);
+		::ArenaManager::Log("AllocateObject arena", (size_t)retVal);
 		return retVal;
 	}
 
@@ -198,7 +198,7 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers )
     INTERIOR_STACK_PROBE_FOR(GetThread(), static_cast<unsigned>(DEFAULT_ENTRY_PROBE_AMOUNT * 1.5));
     retVal = GCHeap::GetGCHeap()->AllocLHeap(size, flags);
     END_INTERIOR_STACK_PROBE;
-	::ArenaControl::Log("AllocateObject GC", (size_t)retVal);
+	::ArenaManager::Log("AllocateObject GC", (size_t)retVal);
 
     return retVal;
 }
@@ -419,12 +419,12 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
     }
 #endif
 
-	void* p = ::ArenaControl::Allocate(totalSize);
+	void* p = ::ArenaManager::Allocate(totalSize);
 	if (p != nullptr)
 	{
 		orArray->SetMethodTable(pArrayMT);
 		// Finalizers and Pointer flags sent to AllocHeap, etc appear not to be needed
-		::ArenaControl::Log("Allocating arena array", (size_t)p);
+		::ArenaManager::Log("Allocating arena array", (size_t)p);
 	} 
 	else if (bAllocateInLargeHeap)
     {
@@ -450,7 +450,7 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
         {
 			
             orArray = (ArrayBase *) Alloc(totalSize, FALSE, pArrayMT->ContainsPointers());
-			::ArenaControl::Log("Allocating GC array", (size_t)orArray);
+			::ArenaManager::Log("Allocating GC array", (size_t)orArray);
 
         }
         orArray->SetMethodTable(pArrayMT);
@@ -634,16 +634,16 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 
     ArrayBase* orObject;
 
-	void* p = ::ArenaControl::Allocate(totalSize);
+	void* p = ::ArenaManager::Allocate(totalSize);
 	if (p != nullptr)
 	{
-		::ArenaControl::Log("JIT_NewArr1 arena", (size_t)p);
+		::ArenaManager::Log("JIT_NewArr1 arena", (size_t)p);
 		orObject = (ArrayBase*)p;
 	}else
     if (bAllocateInLargeHeap)
     {
         orObject = (ArrayBase*) AllocLHeap(totalSize, FALSE, FALSE);
-		::ArenaControl::Log("JIT_NewArr1 gc", (size_t)orObject);
+		::ArenaManager::Log("JIT_NewArr1 gc", (size_t)orObject);
 	}
     else 
     {
@@ -1031,11 +1031,11 @@ OBJECTREF AllocateObject(MethodTable *pMT
         else
 #endif // FEATURE_64BIT_ALIGNMENT
         {
-			void* p = ::ArenaControl::Allocate(pMT->GetBaseSize());
+			void* p = ::ArenaManager::Allocate(pMT->GetBaseSize());
 			if (p != nullptr)
 			{
 				orObject = (Object*)p;
-				::ArenaControl::Log("AllocateObject arena", (size_t)p);
+				::ArenaManager::Log("AllocateObject arena", (size_t)p);
 			}
 			else
 			{
@@ -1043,7 +1043,7 @@ OBJECTREF AllocateObject(MethodTable *pMT
 				orObject = (Object *)Alloc(baseSize,
 					pMT->HasFinalizer(),
 					pMT->ContainsPointers());
-				::ArenaControl::Log("AllocateObject GC", (size_t)orObject);
+				::ArenaManager::Log("AllocateObject GC", (size_t)orObject);
 			}
         }
 

@@ -3,7 +3,13 @@
 
 #include <vcruntime.h>
 #define THREAD_LOCAL thread_local
-class ArenaControl 
+namespace sfl
+{
+	class ArenaAllocator;
+}
+typedef sfl::ArenaAllocator Arena; 
+
+class ArenaManager
 {
 	// x64 process memory is 8192GB (8TB) (43 bits)
 	// Each arena uses a fixed location in virtual memory, which are precalculated based on constants.
@@ -11,6 +17,7 @@ class ArenaControl
 	// minBufferSize to maxBufferSize.
 
 	// number of arenas to support (and provide address spaces for.)
+public:
 	static const int maxArenas = 1024;
 
 	// The amount of address space allocated per arena (1<<32 == 4GB)
@@ -24,12 +31,15 @@ class ArenaControl
 	static const size_t minBufferSize = 1ULL << 24;  //(16MB) min per arena
 	static const size_t maxBufferSize = (1ULL << (arenaAddressShift - 1));
 
+private:
 	// Ensure all arena buffers fit in X64 virtual process memory.
 	static_assert (((size_t)maxArenas << arenaAddressShift) + arenaBaseRequest <= (1ULL << 43), "arenas use too much memory");
 
 	// Reservation system for all arenas.
 	static bool idInUse[maxArenas];
+	static void* arenaById[maxArenas];
 
+	static Arena* MakeArena();
 	// Each thread holds a stack of arenas (which are in heap memory, not arena memory)
 	static THREAD_LOCAL int arenaStackI;
 
@@ -62,6 +72,10 @@ private:
 	// Address alignment copied from "gcpriv.h" 
 	inline static size_t Align(size_t nbytes, int alignment = 7);
 
+	inline static unsigned int Id(void * allocator);
+
+	inline static void* AllocatorFromAddress(void * addr);
+
 public:
 	// Initializes all Arena structures (call this once per process, before all other calls).
 	static void InitArena();
@@ -77,19 +91,27 @@ public:
 	static void Log(char* str, size_t n=0);
 
 	// the current arena (or null).  Used by Masm code
-	static THREAD_LOCAL void* ArenaControl::arena;
+	static THREAD_LOCAL void* ArenaManager::arena;
 
 	// system code (i.e. JIT) that runs in the user thread should not use arenas.
 	static void PushGC();
 	static void Pop();
 
+	static void* ArenaMarshall(void*, void*);
+
 	static bool IsArenaAddress(void*p) {
 		size_t a = (size_t)p; return (a >= arenaBaseRequest && a < arenaRangeEnd);
 	}
+
+	// Deep clones the src object, and returns a pointer.  The clone is done into the allocator
+	// that holds the object target.
+	static void* Marshall(void*src, void*target);
 };
 
-#define ISARENA(x) ::ArenaControl::IsArenaAddress(x)
+#define ISARENA(x) ::ArenaManager::IsArenaAddress(x)
 
 
-#define START_NOT_ARENA_SECTION ::ArenaControl::PushGC();
-#define END_NOT_ARENA_SECTION ::ArenaControl::Pop();
+#define START_NOT_ARENA_SECTION ::ArenaManager::PushGC();
+#define END_NOT_ARENA_SECTION ::ArenaManager::Pop();
+
+extern void* _stdcall ArenaMarshall(void*, void*);
