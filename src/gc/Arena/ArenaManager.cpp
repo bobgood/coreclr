@@ -30,14 +30,14 @@ size_t ArenaManager::virtualBase;
 
 unsigned int ArenaManager::lastId = 0;
 void* ArenaManager::arenaById[maxArenas];
-bool ArenaManager::idInUse[maxArenas];
+unsigned long ArenaManager::refCount[maxArenas];
 
 void ArenaManager::InitArena()
 {
 	for (int i = 0; i < maxArenas; i++)
 	{
 		arenaById[i] = nullptr;
-		idInUse[i] = false;
+		refCount[i] = 0;
 	}
 
 	lastId = 0;
@@ -48,11 +48,24 @@ void ArenaManager::InitArena()
 	}
 }
 
-void ArenaManager::ReleaseId(int id)
+void ArenaManager::DereferenceId(int id)
 {
 	assert(arenaById[id]);
-	idInUse[id] = false;
-	arenaById[id] = nullptr;
+	unsigned long& r = refCount[id];
+	assert(r > 0);
+	if (0 == InterlockedDecrement(&r))
+	{
+		DeleteAllocator(arenaById[id]);
+		arenaById[id] = nullptr;
+	}
+}
+
+void ArenaManager::ReferenceId(int id)
+{
+	assert(arenaById[id]);
+	unsigned long& r = refCount[id];
+	assert(r > 0);
+	InterlockedIncrement(&r);
 }
 
 int ArenaManager::getId()
@@ -61,12 +74,12 @@ int ArenaManager::getId()
 	int cnt = 0;
 	for (int id = lastId + 1; cnt < maxArenas; id = (id + 1) % maxArenas, cnt++)
 	{
-		if (!idInUse[id])
+		if (!refCount[id])
 		{
 			auto was = lastId;
 			if (was == InterlockedCompareExchange(&lastId, id, was))
 			{
-				idInUse[id] = true;
+				refCount[id] = true;
 				return id;
 			}
 		}
@@ -79,11 +92,18 @@ size_t ArenaManager::IdToAddress(int id)
 	return ((size_t)id << arenaAddressShift) + virtualBase;
 }
 
+int _cdecl ArenaManager::GetArenaId()
+{
+	if (arena == nullptr) return -1;
+	return Id(arena);
+}
+
 // Hack
 // 1 = reset to GCHeap
 // 2 = push new arena allocator
 // 3 = push GCHeap
 // 4 = pop
+// 1024+ push old arena
 void _cdecl ArenaManager::SetAllocator(unsigned int type)
 {
 
@@ -92,11 +112,15 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 	{
 		arenaStack = new void*[10];
 	}
-	assert(type >= 1 && type <= 4);
+	
 	switch (type)
 	{
 	case 1:
-		for (int i = 0; i < arenaStackI; i++) DeleteAllocator(arenaStack[i]);
+		for (int i = 0; i < arenaStackI; i++)
+		{
+			DereferenceId(Id(arenaStack[i]));
+		}
+
 		arenaStackI = 0;
 		arenaStack[arenaStackI++] = nullptr;
 		arena = nullptr;
@@ -111,6 +135,13 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 	case 4:
 		Pop();
 		break;
+	default:
+		assert(type >= 1024 && type < (1024 + maxArenas));
+		ReferenceId(type - 1024);
+		arena = (Arena*)arenaById[type - 1024];
+		assert(arena != nullptr);
+		arenaStack[arenaStackI++] = arena;
+
 	}
 }
 
@@ -160,18 +191,23 @@ void _cdecl ArenaManager::PushGC()
 	if (ArenaManager::arenaStack == nullptr) return;
 	::ArenaManager::Log("Push");
 	arenaStack[arenaStackI++] = nullptr;
-	if (arenaStackI > 7) { Log("arenastack overflow"); }
+	if (arenaStackI > 7) { 
+		Log("arenastack overflow"); 
+	}
 	arena = nullptr;
 }
 
-int Popcnt = 0;
+
 void _cdecl ArenaManager::Pop()
 {
 	if (ArenaManager::arenaStack == nullptr) return;
 	::ArenaManager::Log("Pop");
-	Popcnt++;
 	void* allocator = arenaStack[--arenaStackI];
-	DeleteAllocator(allocator);
+	if (allocator != nullptr) 
+	{
+		DereferenceId(Id(allocator));
+	}
+
 	arena = nullptr;
 	if (arenaStackI > 0) {
 		arena = arenaStack[arenaStackI - 1];
@@ -255,8 +291,6 @@ void ArenaManager::DeleteAllocator(void* vallocator)
 	int id = Id(vallocator);
 	Arena* allocator = static_cast<Arena*> (vallocator);
 
-	ReleaseId(Id(allocator));
-	allocator->Destroy();
 	// dispose of clone cache items for disposed arena
 	for (int i = 0; i < maxArenas; i++)
 	{
@@ -297,6 +331,7 @@ void* ArenaManager::Allocate(size_t jsize)
 int lcnt = 0;
 void ArenaManager::Log(char *str, size_t n, size_t n2)
 {
+	return;
 	DWORD written;
 	char bufn[25];
 	_itoa(lcnt++, bufn, 10);
@@ -313,11 +348,11 @@ void ArenaManager::Log(char *str, size_t n, size_t n2)
 	}
 	if (n2 != 0)
 	{
-		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), " -> ", (DWORD)strlen(" -> "), &written, 0);
 		char buf[25];
-		buf[0] = ':'; buf[1] = ' ';
-		buf[2] = '0'; buf[3] = 'x';
-		_ui64toa(n2, buf + 4, 16);
+		buf[0] = ' '; buf[1] = '-';
+		buf[2] = '>'; buf[3] = ' ';
+		buf[4] = '0'; buf[5] = 'x';
+		_ui64toa(n2, buf + 6, 16);
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, (DWORD)strlen(buf), &written, 0);
 	}
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "\n", (DWORD)strlen("\n"), &written, 0);

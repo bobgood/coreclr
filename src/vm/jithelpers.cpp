@@ -1446,7 +1446,7 @@ HCIMPLEND
 HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Portable, SIZE_T moduleDomainID, DWORD dwClassDomainID)
 {
     FCALL_CONTRACT;
-
+	START_NOT_ARENA_SECTION
     DomainLocalModule *pLocalModule = NULL;
 
     if (!Module::IsEncodedModuleIndex(moduleDomainID))
@@ -1466,7 +1466,11 @@ HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Portable, SIZE_T moduleDomainID, DWO
 
     // Tailcall to the slow helper
     ENDFORBIDGC();
-    return HCCALL2(JIT_GetSharedNonGCStaticBase_Helper, pLocalModule, dwClassDomainID);
+	
+
+    void* retVal = HCCALL2(JIT_GetSharedNonGCStaticBase_Helper, pLocalModule, dwClassDomainID);
+	END_NOT_ARENA_SECTION
+	return retVal;
 }
 HCIMPLEND
 
@@ -3401,7 +3405,6 @@ HCIMPLEND
 */
 OBJECTREF allocNewMDArr(TypeHandle typeHnd, unsigned dwNumArgs, va_list args)
 {
-	::ArenaManager::Log("Enter allocNewMDArr", dwNumArgs);
     CONTRACTL {
         THROWS;
         GC_TRIGGERS;
@@ -3443,7 +3446,6 @@ OBJECTREF allocNewMDArr(TypeHandle typeHnd, unsigned dwNumArgs, va_list args)
 
 HCIMPL2VA(Object*, JIT_NewMDArr, CORINFO_CLASS_HANDLE classHnd, unsigned dwNumArgs)
 {
-	::ArenaManager::Log("Entered JIT_NewMDArr");
     FCALL_CONTRACT;
 
     OBJECTREF    ret = 0;

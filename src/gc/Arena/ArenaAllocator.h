@@ -10,7 +10,6 @@
 
 #include "lock.h"
 #include "vector.h"
-#include "HeapAllocator.h"
 #include "debugmacros.h"
 
 namespace sfl

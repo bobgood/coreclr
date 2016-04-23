@@ -1759,6 +1759,11 @@ FCIMPL2(int, GCInterface::CollectionCount, INT32 generation, INT32 getSpecialGCC
 {
 	FCALL_CONTRACT;
 
+	if (generation == 99)
+	{
+		return ::ArenaManager::GetArenaId();
+	}
+
 	//We've already checked this in GC.cs, so we'll just assert it here.
 	_ASSERTE(generation >= 0);
 

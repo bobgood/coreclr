@@ -39,7 +39,7 @@ private:
 	static_assert (((size_t)maxArenas << arenaAddressShift) + arenaBaseRequest <= (1ULL << 43), "arenas use too much memory");
 
 	// Reservation system for all arenas.
-	static bool idInUse[maxArenas];
+	static unsigned long refCount[maxArenas];
 	static void* arenaById[maxArenas];
 
 	static Arena* MakeArena();
@@ -74,8 +74,11 @@ private:
 	// Gets the next available Arena ID
 	inline static int getId();
 
-	// Releases an Arena ID
-	static void ReleaseId(int id);
+	// decrements the reference count, and releases the arena if zero
+	static void DereferenceId(int id);
+	
+	// adds to the reference count
+	static void ReferenceId(int id);
 
 	// Gets the allocator at the top of the stack
 	inline static void* GetArena();
@@ -93,6 +96,8 @@ public:
 
 	// This is the method that the user C# process calls to set the allocator state
 	static void SetAllocator(unsigned int type);
+
+	static int _cdecl GetArenaId();
 
 	// returns null if no arena allocator is active, otherwise returns
 	// a pointer to an allocated buffer
