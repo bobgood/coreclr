@@ -1446,7 +1446,6 @@ HCIMPLEND
 HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Portable, SIZE_T moduleDomainID, DWORD dwClassDomainID)
 {
     FCALL_CONTRACT;
-	START_NOT_ARENA_SECTION
     DomainLocalModule *pLocalModule = NULL;
 
     if (!Module::IsEncodedModuleIndex(moduleDomainID))
@@ -1467,6 +1466,7 @@ HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Portable, SIZE_T moduleDomainID, DWO
     // Tailcall to the slow helper
     ENDFORBIDGC();
 	
+	START_NOT_ARENA_SECTION
 
     void* retVal = HCCALL2(JIT_GetSharedNonGCStaticBase_Helper, pLocalModule, dwClassDomainID);
 	END_NOT_ARENA_SECTION

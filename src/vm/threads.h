@@ -182,6 +182,7 @@ typedef DPTR(PTR_ThreadLocalBlock) PTR_PTR_ThreadLocalBlock;
 #include "threaddebugblockinginfo.h"
 #include "interoputil.h"
 #include "eventtrace.h"
+#include "../gc/Arena/ArenaStack.h"
 
 #ifdef CROSSGEN_COMPILE
 
@@ -390,6 +391,8 @@ public:
 #endif
 
     DWORD       m_dwLastError;
+public:
+	ArenaStack m_arenaStack;
 };
 
 inline void DoReleaseCheckpoint(void *checkPointMarker)
@@ -5595,6 +5598,9 @@ public:
         m_pHijackReturnTypeClass = pClass;
     }
 #endif // FEATURE_UNIX_AMD64_STRUCT_PASSING
+public:
+	ArenaStack m_arenaStack;
+
 };
 
 // End of class Thread

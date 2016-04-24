@@ -2,8 +2,9 @@
 #pragma once
 
 #include <vcruntime.h>
+#include "arenastack.h"
+#include "threads.h"
 
-#define THREAD_LOCAL thread_local
 namespace sfl
 {
 	class ArenaAllocator;
@@ -19,8 +20,8 @@ class ArenaManager
 	// Each arena creates a set of buffers on demand, doubling size on each new buffer from
 	// minBufferSize to maxBufferSize.
 
-	// number of arenas to support (and provide address spaces for.)
 public:
+	// number of arenas to support (and provide address spaces for.)
 	static const int maxArenas = 1024;
 
 	// The amount of address space allocated per arena (1<<32 == 4GB)
@@ -34,6 +35,12 @@ public:
 	static const size_t minBufferSize = 1ULL << 24;  //(16MB) min per arena
 	static const size_t maxBufferSize = (1ULL << (arenaAddressShift - 1));
 
+#ifdef _WIN64
+	static const int headerSize = 8;
+#else
+	static const int headerSize = 4;
+#endif
+
 private:
 	// Ensure all arena buffers fit in X64 virtual process memory.
 	static_assert (((size_t)maxArenas << arenaAddressShift) + arenaBaseRequest <= (1ULL << 43), "arenas use too much memory");
@@ -43,11 +50,6 @@ private:
 	static void* arenaById[maxArenas];
 
 	static Arena* MakeArena();
-	// Each thread holds a stack of arenas (which are in heap memory, not arena memory)
-	static THREAD_LOCAL int arenaStackI;
-
-	// Allocator type not enforced becuase arena library is incompatible with CLR
-	static THREAD_LOCAL void** arenaStack;
 
 	// Should be the same as arenaBaseRequest.  This is the actual location in virtual memory for all arenas.
 	static size_t virtualBase;
@@ -106,9 +108,6 @@ public:
 	// Log method that writes to STD_OUTPUT
 	static void Log(char* str, size_t n = 0, size_t n2 = 0);
 
-	// the current arena (or null).  Used by Masm code
-	static THREAD_LOCAL void* ArenaManager::arena;
-
 	// system code (i.e. JIT) that runs in the user thread should not use arenas.
 	static void PushGC();
 	static void Pop();
@@ -122,7 +121,13 @@ public:
 	// Deep clones the src object, and returns a pointer.  The clone is done into the allocator
 	// that holds the object target.
 	static void* Marshall(void*src, void*target);
+
+	static ArenaStack& GetArenaStack()
+	{
+		return GetThread()->m_arenaStack;
+	}
 };
+
 
 #define ISARENA(x) ::ArenaManager::IsArenaAddress(x)
 

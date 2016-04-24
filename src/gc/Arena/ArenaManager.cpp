@@ -11,13 +11,8 @@
 #include "../threads.h"
 
 // thread_local data. 
+// TlsIdx_ArenaStack,
 
-// arena is the currently assigned allocator (null if not arena).  This variable is available to MASM code
-THREAD_LOCAL void* ArenaManager::arena = nullptr;
-
-// the stack of allocators.  The top of stack is always represented with arena.
-THREAD_LOCAL void** ArenaManager::arenaStack = nullptr;
-THREAD_LOCAL int ArenaManager::arenaStackI = 0;
 
 size_t ArenaManager::virtualBase;
 
@@ -94,6 +89,7 @@ size_t ArenaManager::IdToAddress(int id)
 
 int _cdecl ArenaManager::GetArenaId()
 {
+	Arena* arena = (Arena*)GetArenaStack().Current();
 	if (arena == nullptr) return -1;
 	return Id(arena);
 }
@@ -106,28 +102,26 @@ int _cdecl ArenaManager::GetArenaId()
 // 1024+ push old arena
 void _cdecl ArenaManager::SetAllocator(unsigned int type)
 {
-
-
-	if (arenaStack == nullptr)
-	{
-		arenaStack = new void*[10];
-	}
-	
+	ArenaStack& arenaStack = GetArenaStack();
+	Arena* current_arena;
 	switch (type)
 	{
 	case 1:
-		for (int i = 0; i < arenaStackI; i++)
+		for (int i = 0; i < arenaStack.Size(); i++)
 		{
 			DereferenceId(Id(arenaStack[i]));
 		}
 
-		arenaStackI = 0;
-		arenaStack[arenaStackI++] = nullptr;
-		arena = nullptr;
+		arenaStack.Reset();
 		break;
 	case 2:
-		arena = MakeArena();
-		arenaStack[arenaStackI++] = arena;
+		current_arena = MakeArena();
+		arenaStack.Push(current_arena);
+		Log("Arena Push", arenaStack.Size());
+		if (GetArenaStack().Size() > 3)
+		{
+			Log("over Arena Push", GetArenaStack().Size());
+		}
 		break;
 	case 3:
 		PushGC();
@@ -138,10 +132,14 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 	default:
 		assert(type >= 1024 && type < (1024 + maxArenas));
 		ReferenceId(type - 1024);
-		arena = (Arena*)arenaById[type - 1024];
-		assert(arena != nullptr);
-		arenaStack[arenaStackI++] = arena;
-
+		current_arena = (Arena*)arenaById[type - 1024];
+		assert(current_arena != nullptr);
+		arenaStack.Push(current_arena);
+		Log("Arena reuse Push", arenaStack.Size());
+		if (GetArenaStack().Size() > 1)
+		{
+			Log("over Arena reuse Push", GetArenaStack().Size());
+		}
 	}
 }
 
@@ -188,31 +186,31 @@ Arena* ArenaManager::MakeArena()
 
 void _cdecl ArenaManager::PushGC()
 {
-	if (ArenaManager::arenaStack == nullptr) return;
-	::ArenaManager::Log("Push");
-	arenaStack[arenaStackI++] = nullptr;
-	if (arenaStackI > 7) { 
-		Log("arenastack overflow"); 
+	GetArenaStack().Push(nullptr);
+	Log("GC Push", GetArenaStack().Size());
+	if (GetArenaStack().Size() > 3)
+	{
+		Log("over GC Push", GetArenaStack().Size());
 	}
-	arena = nullptr;
 }
-
 
 void _cdecl ArenaManager::Pop()
 {
-	if (ArenaManager::arenaStack == nullptr) return;
-	::ArenaManager::Log("Pop");
-	void* allocator = arenaStack[--arenaStackI];
-	if (allocator != nullptr) 
+	void* allocator = GetArenaStack().Pop();
+	if (allocator != nullptr)
 	{
 		DereferenceId(Id(allocator));
+		Log("Arena Pop", GetArenaStack().Size());
+		if (GetArenaStack().Size() > 3)
+		{
+			Log("over GC Pop", GetArenaStack().Size());
+		}
 	}
-
-	arena = nullptr;
-	if (arenaStackI > 0) {
-		arena = arenaStack[arenaStackI - 1];
+	else {
+		Log("GC Pop", GetArenaStack().Size());
 	}
 }
+
 ObjectHashTable& ArenaManager::FindCloneTable(void* src, void* target)
 {
 	// There needs to be a hashtable that keeps track of every clone that occurs between each pair of allocators.
@@ -253,7 +251,7 @@ ObjectHashTable& ArenaManager::FindCloneTable(void* src, void* target)
 	return *header.clones[id];
 }
 
- Object* ArenaManager::FindClone(void* src, void* target)
+Object* ArenaManager::FindClone(void* src, void* target)
 {
 	auto cloneTable = FindCloneTable(src, target);
 	bool found;
@@ -276,7 +274,7 @@ bool ArenaManager::SetClone(void* src, void* target)
 
 void* ArenaManager::GetArena()
 {
-	return arena;
+	return GetArenaStack().Current();
 }
 
 unsigned int ArenaManager::Id(void * allocator)
@@ -294,12 +292,12 @@ void ArenaManager::DeleteAllocator(void* vallocator)
 	// dispose of clone cache items for disposed arena
 	for (int i = 0; i < maxArenas; i++)
 	{
-		Arena* a = (Arena*) arenaById[i];
+		Arena* a = (Arena*)arenaById[i];
 		if (a != nullptr)
 		{
 			ArenaHeader* h = (ArenaHeader*)a;
 			h->clones[id] = nullptr;
-		}	
+		}
 	}
 }
 
@@ -319,19 +317,22 @@ inline void* ArenaManager::AllocatorFromAddress(void * addr)
 
 void* ArenaManager::Allocate(size_t jsize)
 {
+	Arena* arena = (Arena*)GetArenaStack().Current();
 	if (arena == nullptr)
 	{
 		return nullptr;
 	}
-	size_t size = Align(jsize);
-	void*ret =  ((Arena*)arena)->Allocate(size);
+	size_t size = Align(jsize) + headerSize;
+	void*ret = (arena)->Allocate(size);
 	memset(ret, 0, size);
-	return ret;
+	return (void*)((char*)ret + headerSize);
 }
 int lcnt = 0;
 void ArenaManager::Log(char *str, size_t n, size_t n2)
 {
-	return;
+	auto& arenaStack = GetArenaStack();
+	if (arenaStack.freezelog) return;
+	arenaStack.freezelog = true;
 	DWORD written;
 	char bufn[25];
 	_itoa(lcnt++, bufn, 10);
@@ -356,6 +357,8 @@ void ArenaManager::Log(char *str, size_t n, size_t n2)
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, (DWORD)strlen(buf), &written, 0);
 	}
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "\n", (DWORD)strlen("\n"), &written, 0);
+
+	arenaStack.freezelog = false;
 }
 
 alloc_context* GetThreadAllocContext();
@@ -425,6 +428,7 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 				case ELEMENT_TYPE_I8:
 				case ELEMENT_TYPE_U8:
 				case ELEMENT_TYPE_R8:
+				case ELEMENT_TYPE_VALUETYPE:
 					IN_WIN64(case ELEMENT_TYPE_I:)
 						IN_WIN64(case ELEMENT_TYPE_U:)
 						case ELEMENT_TYPE_FNPTR:
@@ -478,13 +482,18 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 			case ELEMENT_TYPE_ARRAY:        // all other arrays
 				Log("ELEMENT_TYPE_ARRAY");
 				break;
+			case ELEMENT_TYPE_CHAR:
+			case ELEMENT_TYPE_I4:
+			case ELEMENT_TYPE_U8:
+			case ELEMENT_TYPE_VALUETYPE:
+				break;
 			default:
 				Log("default", (size_t)type);
 				break;
 
 			}
 		}
-	 }
+	}
 
 
 	return p;

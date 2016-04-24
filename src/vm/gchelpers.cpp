@@ -114,7 +114,7 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	else
 		retVal = GCHeap::GetGCHeap()->Alloc(size, flags);
 	END_INTERIOR_STACK_PROBE;
-	::ArenaManager::Log("AllocateObject GC", (size_t)retVal, size);
+	//::ArenaManager::Log("AllocateObject GC", (size_t)retVal, size);
 	return retVal;
 }
 
@@ -151,7 +151,7 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
 		retVal = GCHeap::GetGCHeap()->AllocAlign8(size, flags);
 
 	END_INTERIOR_STACK_PROBE;
-	:ArenaManager::Log("AllocateObject GC2", retVal, size);
+	//::ArenaManager::Log("AllocateObject GC2", retVal, size);
 	return retVal;
 }
 #endif // FEATURE_64BIT_ALIGNMENT
@@ -199,7 +199,7 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	INTERIOR_STACK_PROBE_FOR(GetThread(), static_cast<unsigned>(DEFAULT_ENTRY_PROBE_AMOUNT * 1.5));
 	retVal = GCHeap::GetGCHeap()->AllocLHeap(size, flags);
 	END_INTERIOR_STACK_PROBE;
-	::ArenaManager::Log("AllocateObject GC3", (size_t)retVal, size);
+	//::ArenaManager::Log("AllocateObject GC3", (size_t)retVal, size);
 
 	return retVal;
 }
@@ -1022,8 +1022,11 @@ OBJECTREF AllocateObject(MethodTable *pMT
 				pMT->ContainsPointers());
 		}
 
-		// verify zero'd memory (at least for sync block)
-		_ASSERTE(orObject->HasEmptySyncBlockInfo());
+		if (!orObject->HasEmptySyncBlockInfo())
+		{
+			// verify zero'd memory (at least for sync block)
+			_ASSERTE(orObject->HasEmptySyncBlockInfo());
+		}
 
 
 		if ((baseSize >= LARGE_OBJECT_SIZE))
