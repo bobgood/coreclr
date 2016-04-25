@@ -1466,10 +1466,10 @@ HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Portable, SIZE_T moduleDomainID, DWO
     // Tailcall to the slow helper
     ENDFORBIDGC();
 	
-	START_NOT_ARENA_SECTION
+	/*START_NOT_ARENA_SECTION*/
 
     void* retVal = HCCALL2(JIT_GetSharedNonGCStaticBase_Helper, pLocalModule, dwClassDomainID);
-	END_NOT_ARENA_SECTION
+	/*END_NOT_ARENA_SECTION*/
 	return retVal;
 }
 HCIMPLEND

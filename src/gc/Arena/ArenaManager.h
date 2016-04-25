@@ -69,7 +69,11 @@ private:
 	// thread safe - returns false if the value was already set
 	static bool SetClone(void* src, void* target);
 
+
 private:
+	static void CloneArray(void* dst, Object* src, PTR_MethodTable mt, int offset);
+	static void CloneClass(void* dst, Object* src, PTR_MethodTable mt, int offset);
+
 	// Deletes an Arena and releases all its memory.
 	static void DeleteAllocator(void*);
 
@@ -106,7 +110,7 @@ public:
 	static void* Allocate(size_t jsize);
 
 	// Log method that writes to STD_OUTPUT
-	static void Log(char* str, size_t n = 0, size_t n2 = 0);
+	static void Log(char* str, size_t n = 0, size_t n2 = 0,char*hdr=nullptr);
 
 	// system code (i.e. JIT) that runs in the user thread should not use arenas.
 	static void PushGC();

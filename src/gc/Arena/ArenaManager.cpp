@@ -15,7 +15,7 @@
 
 
 size_t ArenaManager::virtualBase;
-
+TypeHandle LoadExactFieldType(FieldDesc *pFD, MethodTable *pEnclosingMT, AppDomain *pDomain);
 
 // lastId keeps track of the last id used to create an arena.  
 // the next one allocated will try at lastId+1, and keep trying
@@ -328,7 +328,7 @@ void* ArenaManager::Allocate(size_t jsize)
 	return (void*)((char*)ret + headerSize);
 }
 int lcnt = 0;
-void ArenaManager::Log(char *str, size_t n, size_t n2)
+void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr)
 {
 	auto& arenaStack = GetArenaStack();
 	if (arenaStack.freezelog) return;
@@ -336,8 +336,15 @@ void ArenaManager::Log(char *str, size_t n, size_t n2)
 	DWORD written;
 	char bufn[25];
 	_itoa(lcnt++, bufn, 10);
+
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), " Log ", (DWORD)strlen(" Log "), &written, 0);
+	if (hdr != nullptr)
+	{
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), hdr, (DWORD)strlen(hdr), &written, 0);
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), " = ", (DWORD)strlen(" = "), &written, 0);
+	}
+
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), str, (DWORD)strlen(str), &written, 0);
 	if (n != 0)
 	{
@@ -398,105 +405,164 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 	PTR_MethodTable mt = src->GetMethodTable();
 	if (mt->IsArray())
 	{
-
-		TypeHandle arrayTypeHandle = src->GetGCSafeTypeHandle();
-		ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
-		TypeHandle ty = ar->GetArrayElementTypeHandle();
-		const CorElementType arrayElType = ty.GetVerifierCorElementType();
-
-		switch (arrayElType) {
-
-		case ELEMENT_TYPE_I1:
-		case ELEMENT_TYPE_U1:
-		case ELEMENT_TYPE_BOOLEAN:
-			//*retVal = IndexOfUINT8((U1*)array->GetDataPtr(), index, count, *(U1*)value->UnBox());
-			break;
-
-		case ELEMENT_TYPE_I2:
-		case ELEMENT_TYPE_U2:
-		case ELEMENT_TYPE_CHAR:
-			//*retVal = ArrayHelpers<U2>::IndexOf((U2*)array->GetDataPtr(), index, count, *(U2*)value->UnBox());
-			break;
-
-		case ELEMENT_TYPE_I4:
-		case ELEMENT_TYPE_U4:
-		case ELEMENT_TYPE_R4:
-			IN_WIN32(case ELEMENT_TYPE_I:)
-				IN_WIN32(case ELEMENT_TYPE_U:)
-				break;
-
-				case ELEMENT_TYPE_I8:
-				case ELEMENT_TYPE_U8:
-				case ELEMENT_TYPE_R8:
-				case ELEMENT_TYPE_VALUETYPE:
-					IN_WIN64(case ELEMENT_TYPE_I:)
-						IN_WIN64(case ELEMENT_TYPE_U:)
-						case ELEMENT_TYPE_FNPTR:
-							//*retVal = ArrayHelpers<U8>::IndexOf((U8*)array->GetDataPtr(), index, count, *(U8*)value->UnBox());
-							break;
-
-						case ELEMENT_TYPE_PTR:
-							break;
-						case ELEMENT_TYPE_STRING:
-						case ELEMENT_TYPE_CLASS: // objectrefs
-						case ELEMENT_TYPE_OBJECT:
-						case ELEMENT_TYPE_SZARRAY:      // single dim, zero
-						case ELEMENT_TYPE_ARRAY:        // all other arrays
-							// this is where we recursively follow
-							break;
-						default:
-							_ASSERTE(!"Unrecognized primitive type in ArrayHelper::TrySZIndexOf");
-							return p;
-		}
+		CloneArray(p, src, mt, sizeof(Object));
 	}
 	else
 	{
-		DWORD numInstanceFields = mt->GetNumInstanceFields();
-		if (numInstanceFields == 0) return p;
-		FieldDesc *pSrcFields = mt->GetApproxFieldDescListRaw();
-		if (pSrcFields == nullptr) return p;
-		for (DWORD i = 0; i < numInstanceFields; i++)
-		{
-			FieldDesc f = pSrcFields[i];
-			if (f.IsStatic()) continue;
-			CorElementType type = f.GetFieldType();
-			switch (type) {
-			case ELEMENT_TYPE_FNPTR:
-				Log("ELEMENT_TYPE_FNPTR");
-				break;
-			case ELEMENT_TYPE_PTR:
-				Log("ELEMENT_TYPE_PTR");
-				break;
-			case ELEMENT_TYPE_STRING:
-				Log("ELEMENT_TYPE_STRING");
-				break;
-			case ELEMENT_TYPE_CLASS: // objectrefs
-				Log("ELEMENT_TYPE_CLASS");
-				break;
-			case ELEMENT_TYPE_OBJECT:
-				Log("ELEMENT_TYPE_OBJECT");
-				break;
-			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
-				Log("ELEMENT_TYPE_SZARRAY");
-				break;
-			case ELEMENT_TYPE_ARRAY:        // all other arrays
-				Log("ELEMENT_TYPE_ARRAY");
-				break;
-			case ELEMENT_TYPE_CHAR:
-			case ELEMENT_TYPE_I4:
-			case ELEMENT_TYPE_U8:
-			case ELEMENT_TYPE_VALUETYPE:
-				break;
-			default:
-				Log("default", (size_t)type);
-				break;
-
-			}
-		}
+		CloneClass(p, src, mt, sizeof(Object));
 	}
 
 
 	return p;
+}
+
+void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable mt, int ioffset)
+{
+	TypeHandle arrayTypeHandle = src->GetGCSafeTypeHandle();
+	ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
+	TypeHandle ty = ar->GetArrayElementTypeHandle();
+	const CorElementType arrayElType = ty.GetVerifierCorElementType();
+
+	switch (arrayElType) {
+
+	case ELEMENT_TYPE_I1:
+	case ELEMENT_TYPE_U1:
+	case ELEMENT_TYPE_BOOLEAN:
+	case ELEMENT_TYPE_I2:
+	case ELEMENT_TYPE_U2:
+	case ELEMENT_TYPE_CHAR:
+	case ELEMENT_TYPE_I4:
+	case ELEMENT_TYPE_U4:
+	case ELEMENT_TYPE_R4:
+	IN_WIN32(case ELEMENT_TYPE_I:)
+		IN_WIN32(case ELEMENT_TYPE_U:)
+		case ELEMENT_TYPE_I8:
+		case ELEMENT_TYPE_U8:
+		case ELEMENT_TYPE_R8:
+		IN_WIN64(case ELEMENT_TYPE_I:)
+		IN_WIN64(case ELEMENT_TYPE_U:)
+		case ELEMENT_TYPE_FNPTR:
+		case ELEMENT_TYPE_PTR:
+			break;
+		case ELEMENT_TYPE_VALUETYPE:
+			break;
+		case ELEMENT_TYPE_STRING:
+			break;
+		case ELEMENT_TYPE_CLASS: // objectrefs
+			break;
+		case ELEMENT_TYPE_OBJECT:
+			break;
+		case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+			break;
+		case ELEMENT_TYPE_ARRAY:        // all other arrays
+										// this is where we recursively follow
+			break;
+		default:
+			_ASSERTE(!"Unrecognized primitive type in ArrayHelper::TrySZIndexOf");
+	
+	}
+}
+
+void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int ioffset)
+{
+	Log((char*)mt->GetDebugClassName(),0,0,"cloneclass");
+	DWORD numInstanceFields = mt->GetNumInstanceFields();
+	if (numInstanceFields == 0) return;
+	FieldDesc *pSrcFields = mt->GetApproxFieldDescListRaw();
+	if (pSrcFields == nullptr) return;
+	for (DWORD i = 0; i < numInstanceFields; i++)
+	{
+		FieldDesc f = pSrcFields[i];
+		if (f.IsStatic()) continue;
+		CorElementType type = f.GetFieldType();
+		DWORD offset = f.GetOffset() + ioffset;
+
+		LPCUTF8 szFieldName = f.GetDebugName();
+		Log((char*)szFieldName,0,0,"field");
+
+		switch (type) {
+		case ELEMENT_TYPE_BOOLEAN:
+		case ELEMENT_TYPE_I1:
+		case ELEMENT_TYPE_U1:
+		case ELEMENT_TYPE_I2:
+		case ELEMENT_TYPE_U2:
+		case ELEMENT_TYPE_CHAR:
+		case ELEMENT_TYPE_I4:
+		case ELEMENT_TYPE_U4:
+		case ELEMENT_TYPE_I8:
+		case ELEMENT_TYPE_U8:
+		case ELEMENT_TYPE_I:
+		case ELEMENT_TYPE_U:
+		case ELEMENT_TYPE_R4:
+		case ELEMENT_TYPE_R8:
+			// basic types are handled with memcpy
+			break;
+		case ELEMENT_TYPE_VALUETYPE:
+		{
+			
+			TypeHandle th = LoadExactFieldType(&pSrcFields[i], mt, GetAppDomain());
+			CloneClass((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), offset);
+		}
+		break;
+		case ELEMENT_TYPE_PTR:
+		case ELEMENT_TYPE_FNPTR:
+			// pointers may be dangerous, but they are
+			// copied without chang
+			break;
+		case ELEMENT_TYPE_STRING:
+		case ELEMENT_TYPE_CLASS: // objectrefs
+		case ELEMENT_TYPE_OBJECT:
+		case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+		case ELEMENT_TYPE_ARRAY:        // all other arrays
+			{
+				OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + offset);
+				if (pSrc != nullptr)
+				{
+					void* clone = ArenaMarshall(dst, pSrc);
+					void** rdst = (void**)((char*)dst + offset);
+					*rdst = clone;
+				}
+			}
+			break;
+		default:
+			Log("default", (size_t)type);
+			break;
+
+		}
+	}
+}
+
+// Given a FieldDesc which may be representative and an object which contains said field, return the actual type of the field. This
+// works even when called from a different appdomain from which the type was loaded (though naturally it is the caller's
+// responsbility to ensure such an appdomain cannot be unloaded during the processing of this method).
+TypeHandle LoadExactFieldType(FieldDesc *pFD, MethodTable *pEnclosingMT, AppDomain *pDomain)
+{
+	CONTRACTL{
+		THROWS;
+	GC_TRIGGERS;
+	MODE_COOPERATIVE;
+	} CONTRACTL_END;
+
+	// Set up a field signature with the owning type providing a type context for any type variables.
+	MetaSig sig(pFD, TypeHandle(pEnclosingMT));
+	sig.NextArg();
+
+	// If the enclosing type is resident to this domain or domain neutral and loaded in this domain then we can simply go get it.
+	// The logic is trickier (and more expensive to calculate) for generic types, so skip the optimization there.
+	if (pEnclosingMT->GetDomain() == GetAppDomain() ||
+		(pEnclosingMT->IsDomainNeutral() &&
+			!pEnclosingMT->HasInstantiation() &&
+			pEnclosingMT->GetAssembly()->FindDomainAssembly(GetAppDomain())))
+		return sig.GetLastTypeHandleThrowing();
+
+	TypeHandle retTH;
+
+	// Otherwise we have to do this the expensive way -- switch to the home domain for the type lookup.
+	ENTER_DOMAIN_PTR(pDomain, ADV_RUNNINGIN);
+	retTH = sig.GetLastTypeHandleThrowing();
+	END_DOMAIN_TRANSITION;
+
+	return retTH;
 }
 
 void* RunAllocator(void* allocator, size_t len)
