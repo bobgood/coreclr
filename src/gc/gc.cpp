@@ -35618,6 +35618,7 @@ int GCHeap::EndNoGCRegion()
 void GCHeap::PublishObject (uint8_t* Obj)
 {
 #ifdef BACKGROUND_GC
+	if ((size_t)Obj >= ArenaManager::arenaBaseRequest) return;
     gc_heap* hp = gc_heap::heap_of (Obj);
     hp->bgc_alloc_lock->loh_alloc_done (Obj);
 #endif //BACKGROUND_GC

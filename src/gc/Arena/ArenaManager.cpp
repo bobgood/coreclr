@@ -341,6 +341,7 @@ void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr)
 {
 	auto& arenaStack = GetArenaStack();
 	if (arenaStack.freezelog) return;
+	
 	arenaStack.freezelog = true;
 	DWORD written;
 	char bufn[25];
@@ -375,6 +376,7 @@ void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr)
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "\n", (DWORD)strlen("\n"), &written, 0);
 
 	arenaStack.freezelog = false;
+	if (lcnt == 1)Log("watch", n + 0xfd8);
 }
 
 alloc_context* GetThreadAllocContext();

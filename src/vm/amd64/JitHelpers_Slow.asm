@@ -159,7 +159,7 @@ endif
         ret
 
 	MixedArenaGC:
-	    mov rbx,rcx
+		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
         alloc_stack         20h
@@ -172,8 +172,8 @@ endif
 
 		
         POP_CALLEE_SAVED_REGISTERS
-		
-		mov     [rbx], rax
+		pop     rcx
+		mov     [rcx], rax
 		ret
 
 
