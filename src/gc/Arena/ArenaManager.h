@@ -3,7 +3,7 @@
 
 #include <vcruntime.h>
 #include "arenastack.h"
-#include "threads.h"
+#include "..\..\vm\threads.h"
 
 namespace sfl
 {
@@ -71,7 +71,7 @@ private:
 
 
 private:
-	static void CloneArray(void* dst, Object* src, PTR_MethodTable mt, int offset);
+	static void CloneArray(void* dst, Object* src, PTR_MethodTable mt, int offset,size_t size);
 	static void CloneClass(void* dst, Object* src, PTR_MethodTable mt, int offset);
 
 	// Deletes an Arena and releases all its memory.

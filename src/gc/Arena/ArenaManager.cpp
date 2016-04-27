@@ -8,7 +8,6 @@
 #include "../object.h"
 
 #define FEATURE_IMPLICIT_TLS
-#include "../threads.h"
 
 // thread_local data. 
 // TlsIdx_ArenaStack,
@@ -387,25 +386,29 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 	{
 		DWORD flags = ((bContainsPointers ? GC_ALLOC_CONTAINS_REF : 0) |
 			(bFinalize ? GC_ALLOC_FINALIZE : 0));
-
+		PushGC();
 		if (GCHeap::UseAllocationContexts())
 			p = GCHeap::GetGCHeap()->Alloc(GetThreadAllocContext(), size, flags);
 		else
 			p = GCHeap::GetGCHeap()->Alloc(size, flags);
+		Pop();
 	}
 	else
 	{
-		p = dstAllocator->Allocate(size);
+		void** p1 = (void**)dstAllocator->Allocate(size + 8);
+		*p1 = nullptr;
+		p = (char*)p1 + 8;
 	}
+	Log("Cloned object allocated ", (size_t)p, size);
 
 	// We know this is not a ByValueClass, but we must do our own reflection, so we start with copying the whole
 	// class, and we will fix the fields that are not value v
 	for (char*ip = (char*)vsrc, *op = (char*)p; ip < (char*)vsrc + size; ) *op++ = *ip++;
-
+	Log("memwrite", (size_t)p, (size_t)p + size);
 	PTR_MethodTable mt = src->GetMethodTable();
 	if (mt->IsArray())
 	{
-		CloneArray(p, src, mt, sizeof(Object));
+		CloneArray(p, src, mt, sizeof(ArrayBase),size);
 	}
 	else
 	{
@@ -416,11 +419,14 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 	return p;
 }
 
-void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable mt, int ioffset)
+void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable mt, int ioffset,size_t size)
 {
+	Log((char*)mt->GetDebugClassName(), 0, 0, "clonearray");
 	TypeHandle arrayTypeHandle = src->GetGCSafeTypeHandle();
 	ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
 	TypeHandle ty = ar->GetArrayElementTypeHandle();
+	ArrayBase* refArray = (ArrayBase*)src;
+	DWORD numComponents = refArray->GetNumComponents();
 	const CorElementType arrayElType = ty.GetVerifierCorElementType();
 
 	switch (arrayElType) {
@@ -449,6 +455,20 @@ void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable mt, int io
 		case ELEMENT_TYPE_STRING:
 			break;
 		case ELEMENT_TYPE_CLASS: // objectrefs
+		{
+			for (int i = ioffset; i < ioffset+numComponents*sizeof(void*); i+= sizeof(void*))
+			{
+				OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + i);
+				if (pSrc != nullptr && (size_t)pSrc<arenaRangeEnd)
+				{
+					void* clone = ArenaMarshall(dst, pSrc);
+					void** rdst = (void**)((char*)dst + i);
+					*rdst = clone;
+					Log("memwriteptr", (size_t)rdst, (size_t)clone);
+				}
+			}
+		}
+			
 			break;
 		case ELEMENT_TYPE_OBJECT:
 			break;
@@ -515,19 +535,20 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 		case ELEMENT_TYPE_SZARRAY:      // single dim, zero
 		case ELEMENT_TYPE_ARRAY:        // all other arrays
 			{
-				OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + offset);
+				void *pSrc = *(void **)((char*)src + offset);
 				if (pSrc != nullptr)
 				{
-					void* clone = ArenaMarshall(dst, pSrc);
+					Log((char*)((Object*)pSrc)->GetMethodTable()->GetDebugClassName(), 0, 0, "field type (to clone)");
 					void** rdst = (void**)((char*)dst + offset);
+					void* clone = ArenaMarshall((void*)rdst, pSrc);
 					*rdst = clone;
+					Log("memwriteptr", (size_t)rdst, (size_t)clone);
 				}
 			}
 			break;
 		default:
 			Log("default", (size_t)type);
 			break;
-
 		}
 	}
 }
