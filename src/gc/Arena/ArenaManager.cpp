@@ -314,6 +314,7 @@ inline void* ArenaManager::AllocatorFromAddress(void * addr)
 	return arenaById[id];
 }
 
+
 void* ArenaManager::Allocate(size_t jsize)
 {
 	Arena* arena = (Arena*)GetArenaStack().Current();
@@ -326,6 +327,15 @@ void* ArenaManager::Allocate(size_t jsize)
 	memset(ret, 0, size);
 	return (void*)((char*)ret + headerSize);
 }
+
+void* ArenaManager::Allocate(Arena* arena, size_t jsize)
+{
+	size_t size = Align(jsize) + headerSize;
+	void*ret = (arena)->Allocate(size);
+	memset(ret, 0, size);
+	return (void*)((char*)ret + headerSize);
+}
+
 int lcnt = 0;
 void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr)
 {
@@ -384,9 +394,9 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 	bool bFinalize = false;
 	if (dstAllocator == nullptr)
 	{
+		PushGC();
 		DWORD flags = ((bContainsPointers ? GC_ALLOC_CONTAINS_REF : 0) |
 			(bFinalize ? GC_ALLOC_FINALIZE : 0));
-		PushGC();
 		if (GCHeap::UseAllocationContexts())
 			p = GCHeap::GetGCHeap()->Alloc(GetThreadAllocContext(), size, flags);
 		else
@@ -395,15 +405,14 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 	}
 	else
 	{
-		void** p1 = (void**)dstAllocator->Allocate(size + 8);
-		*p1 = nullptr;
-		p = (char*)p1 + 8;
+		p = Allocate(dstAllocator, size);
 	}
+
 	Log("Cloned object allocated ", (size_t)p, size);
 
 	// We know this is not a ByValueClass, but we must do our own reflection, so we start with copying the whole
 	// class, and we will fix the fields that are not value v
-	for (char*ip = (char*)vsrc, *op = (char*)p; ip < (char*)vsrc + size; ) *op++ = *ip++;
+	for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
 	Log("memwrite", (size_t)p, (size_t)p + size);
 	PTR_MethodTable mt = src->GetMethodTable();
 	if (mt->IsArray())
@@ -414,7 +423,6 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 	{
 		CloneClass(p, src, mt, sizeof(Object));
 	}
-
 
 	return p;
 }

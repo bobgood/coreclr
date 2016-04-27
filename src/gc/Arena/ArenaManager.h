@@ -109,6 +109,9 @@ public:
 	// a pointer to an allocated buffer
 	static void* Allocate(size_t jsize);
 
+	// Returns a pointer to allocated memory from a specific arena
+	static void* Allocate(Arena* arena, size_t jsize);
+
 	// Log method that writes to STD_OUTPUT
 	static void Log(char* str, size_t n = 0, size_t n2 = 0,char*hdr=nullptr);
 
