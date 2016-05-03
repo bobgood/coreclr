@@ -11,7 +11,10 @@
 
 // thread_local data. 
 // TlsIdx_ArenaStack,
-
+//
+//#include "threads.h"
+//static const int v = offsetof(Thread, m_arenaStack);
+//static_assert(v == 1896, "v is not 1896");
 
 size_t ArenaManager::virtualBase;
 TypeHandle LoadExactFieldType(FieldDesc *pFD, MethodTable *pEnclosingMT, AppDomain *pDomain);
@@ -115,11 +118,20 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 		break;
 	case 2:
 		current_arena = MakeArena();
+		{
+			DWORD written;
+			char bufn[25];
+			_itoa((size_t)current_arena>>32, bufn, 16);
+
+			WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
+			WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "Arena\n", (DWORD)strlen("Arena\n"), &written, 0);
+
+		}
 		arenaStack.Push(current_arena);
-		Log("Arena Push", arenaStack.Size());
+		//Log("Arena Push", arenaStack.Size());
 		if (GetArenaStack().Size() > 3)
 		{
-			Log("over Arena Push", GetArenaStack().Size());
+			//Log("over Arena Push", GetArenaStack().Size());
 		}
 		break;
 	case 3:
@@ -134,10 +146,10 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 		current_arena = (Arena*)arenaById[type - 1024];
 		assert(current_arena != nullptr);
 		arenaStack.Push(current_arena);
-		Log("Arena reuse Push", arenaStack.Size());
+		//Log("Arena reuse Push", arenaStack.Size());
 		if (GetArenaStack().Size() > 1)
 		{
-			Log("over Arena reuse Push", GetArenaStack().Size());
+			//Log("over Arena reuse Push", GetArenaStack().Size());
 		}
 	}
 }
@@ -186,10 +198,10 @@ Arena* ArenaManager::MakeArena()
 void _cdecl ArenaManager::PushGC()
 {
 	GetArenaStack().Push(nullptr);
-	Log("GC Push", GetArenaStack().Size());
+	//Log("GC Push", GetArenaStack().Size());
 	if (GetArenaStack().Size() > 3)
 	{
-		Log("over GC Push", GetArenaStack().Size());
+		//Log("over GC Push", GetArenaStack().Size());
 	}
 }
 
@@ -199,14 +211,14 @@ void _cdecl ArenaManager::Pop()
 	if (allocator != nullptr)
 	{
 		DereferenceId(Id(allocator));
-		Log("Arena Pop", GetArenaStack().Size());
+		//Log("Arena Pop", GetArenaStack().Size());
 		if (GetArenaStack().Size() > 3)
 		{
-			Log("over GC Pop", GetArenaStack().Size());
+			//Log("over GC Pop", GetArenaStack().Size());
 		}
 	}
 	else {
-		Log("GC Pop", GetArenaStack().Size());
+		//Log("GC Pop", GetArenaStack().Size());
 	}
 }
 
@@ -314,7 +326,8 @@ inline void* ArenaManager::AllocatorFromAddress(void * addr)
 	return arenaById[id];
 }
 
-
+int cnty = 0;
+int cntx = 0;
 void* ArenaManager::Allocate(size_t jsize)
 {
 	Arena* arena = (Arena*)GetArenaStack().Current();
@@ -322,9 +335,11 @@ void* ArenaManager::Allocate(size_t jsize)
 	{
 		return nullptr;
 	}
+
 	size_t size = Align(jsize) + headerSize;
 	void*ret = (arena)->Allocate(size);
-	memset(ret, 0, size);
+	
+//	memset(ret, 0, size); it already is zero
 	return (void*)((char*)ret + headerSize);
 }
 
@@ -337,18 +352,47 @@ void* ArenaManager::Allocate(Arena* arena, size_t jsize)
 }
 
 int lcnt = 0;
+volatile DWORD spinlock;
+int lockdep = 0;
 void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr)
 {
-	auto& arenaStack = GetArenaStack();
-	if (arenaStack.freezelog) return;
+	return;
+	int spinCnt = 0;
+	auto tid = GetCurrentThreadId();
+
+	for (;;)
+	{
+		auto was = ::InterlockedCompareExchange(&spinlock, tid, 0);
+		if (was == 0)
+		{
+			lockdep = 0;
+			break;
+		}
+		if (was == tid)
+		{
+			lockdep++;
+			break;
+		}
+	}
 	
-	arenaStack.freezelog = true;
+	auto& arenaStack = GetArenaStack();
+	
+	
+	
 	DWORD written;
 	char bufn[25];
 	_itoa(lcnt++, bufn, 10);
 
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), " Log ", (DWORD)strlen(" Log "), &written, 0);
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "[", (DWORD)strlen("["), &written, 0);
+	_itoa(tid, bufn, 10);
+
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
+	_itoa(arenaStack.Size(), bufn, 10);
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "@", (DWORD)strlen("@"), &written, 0);
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
+	if (arenaStack.Current()!=nullptr)WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "#", (DWORD)strlen("#"), &written, 0);
+	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "] Log ", (DWORD)strlen("] Log "), &written, 0);
 	if (hdr != nullptr)
 	{
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), hdr, (DWORD)strlen(hdr), &written, 0);
@@ -374,23 +418,58 @@ void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr)
 		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, (DWORD)strlen(buf), &written, 0);
 	}
 	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "\n", (DWORD)strlen("\n"), &written, 0);
-
-	arenaStack.freezelog = false;
-	if (lcnt == 1)Log("watch", n + 0xfd8);
+	if (lockdep-- <= 0)
+	{
+		spinlock = 0;
+	}
 }
 
 alloc_context* GetThreadAllocContext();
 
+volatile DWORD spinlock2 = 0;
+int lockdepth = 0;
+
 void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 {
-	ArenaManager::Log("ArenaMarshall", (size_t)vsrc, (size_t)vdst);
+	if (vsrc == nullptr) return nullptr;
+			auto tid = GetCurrentThreadId();
+		for (;;)
+		{
+			auto was = ::InterlockedCompareExchange(&spinlock2, tid, 0);
+			if (was == 0)
+			{
+				lockdepth = 0;
+				break;
+			}
+			if (was == tid)
+			{
+				lockdepth++;
+				break;
+			}
+		}
+		cntx++;
+		
+		if (cntx % 100 == 0 || cntx>9100)
+		{
+			DWORD written;
+			char bufn[25];
+			_itoa(cntx, bufn, 10);
+
+			WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
+			WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "M\n", (DWORD)strlen("M\n"), &written, 0);
+
+		}
+
+
+	//Log("ArenaMarshall", (size_t)vsrc, (size_t)vdst);
 
 	// src Allocator is not used
 	Arena* srcAllocator = (Arena*)AllocatorFromAddress(vsrc);
 	Arena* dstAllocator = (Arena*)AllocatorFromAddress(vdst);
 
 	Object* src = (Object*)vsrc;
-	size_t size = src->GetSize();
+	size_t size =  src->GetSize();
+
 	void *p = nullptr;
 	bool bContainsPointers = false;
 	bool bFinalize = false;
@@ -410,31 +489,35 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 		p = Allocate(dstAllocator, size);
 	}
 
-	Log("Cloned object allocated ", (size_t)p, size);
-
+	//Log("Cloned object allocated ", (size_t)p, size);
 	// We know this is not a ByValueClass, but we must do our own reflection, so we start with copying the whole
 	// class, and we will fix the fields that are not value v
 	for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
-	Log("memwrite", (size_t)p, (size_t)p + size);
-	PTR_MethodTable mt = src->GetMethodTable();
-	if (mt->IsArray())
+	//Log("memwrite", (size_t)p, (size_t)p + size);
+	PTR_MethodTable pMT = src->GetMethodTable();
+	if (pMT->IsArray())
 	{
-		CloneArray(p, src, mt, sizeof(ArrayBase),size);
+		CloneArray(p, src, pMT, sizeof(ArrayBase),size);
 	}
 	else
 	{
-		CloneClass(p, src, mt, sizeof(Object));
+		CloneClass(p, src, pMT, sizeof(Object));
 	}
-
+	//Log("ArenaMarshall End");
+	if (lockdepth--<=0)
+	spinlock2 = 0;
 	return p;
 }
 
-void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable mt, int ioffset,size_t size)
+void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int ioffset,size_t size)
 {
-	Log((char*)mt->GetDebugClassName(), 0, 0, "clonearray");
-	TypeHandle arrayTypeHandle = src->GetGCSafeTypeHandle();
+#if DEBUG
+	//Log((char*)pMT->GetDebugClassName(), 0, 0, "clonearray");
+#endif
+	TypeHandle arrayTypeHandle = ArrayBase::GetTypeHandle(pMT);
 	ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
 	TypeHandle ty = ar->GetArrayElementTypeHandle();
+	size_t componentSize = src->GetSize();
 	ArrayBase* refArray = (ArrayBase*)src;
 	DWORD numComponents = refArray->GetNumComponents();
 	const CorElementType arrayElType = ty.GetVerifierCorElementType();
@@ -451,51 +534,58 @@ void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable mt, int io
 	case ELEMENT_TYPE_U4:
 	case ELEMENT_TYPE_R4:
 	IN_WIN32(case ELEMENT_TYPE_I:)
-		IN_WIN32(case ELEMENT_TYPE_U:)
-		case ELEMENT_TYPE_I8:
-		case ELEMENT_TYPE_U8:
-		case ELEMENT_TYPE_R8:
-		IN_WIN64(case ELEMENT_TYPE_I:)
-		IN_WIN64(case ELEMENT_TYPE_U:)
-		case ELEMENT_TYPE_FNPTR:
-		case ELEMENT_TYPE_PTR:
-			break;
-		case ELEMENT_TYPE_VALUETYPE:
-			break;
-		case ELEMENT_TYPE_STRING:
-			break;
-		case ELEMENT_TYPE_CLASS: // objectrefs
+	IN_WIN32(case ELEMENT_TYPE_U:)
+	case ELEMENT_TYPE_I8:
+	case ELEMENT_TYPE_U8:
+	case ELEMENT_TYPE_R8:
+	IN_WIN64(case ELEMENT_TYPE_I:)
+	IN_WIN64(case ELEMENT_TYPE_U:)
+		break;
+	case ELEMENT_TYPE_FNPTR:
+	case ELEMENT_TYPE_PTR:
+		break;
+	case ELEMENT_TYPE_VALUETYPE:
+		for (size_t i = ioffset; i < ioffset + numComponents*componentSize; i += componentSize)
 		{
-			for (int i = ioffset; i < ioffset+numComponents*sizeof(void*); i+= sizeof(void*))
+			CloneClass((char*)dst+i, (Object*)((char*)src +i), ty.AsMethodTable(), 0);
+		}
+
+		break;
+	case ELEMENT_TYPE_STRING:
+		break;
+	case ELEMENT_TYPE_CLASS: // objectrefs
+	{
+		for (int i = ioffset; i < ioffset+numComponents*sizeof(void*); i+= sizeof(void*))
+		{
+			OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + i);
+			if (pSrc != nullptr && (size_t)pSrc<arenaRangeEnd)
 			{
-				OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + i);
-				if (pSrc != nullptr && (size_t)pSrc<arenaRangeEnd)
-				{
-					void* clone = ArenaMarshall(dst, pSrc);
-					void** rdst = (void**)((char*)dst + i);
-					*rdst = clone;
-					Log("memwriteptr", (size_t)rdst, (size_t)clone);
-				}
+				void* clone = ArenaMarshall(dst, pSrc);
+				void** rdst = (void**)((char*)dst + i);
+				*rdst = clone;
+				//Log("memwriteptr", (size_t)rdst, (size_t)clone);
 			}
 		}
-			
-			break;
-		case ELEMENT_TYPE_OBJECT:
-			break;
-		case ELEMENT_TYPE_SZARRAY:      // single dim, zero
-			break;
-		case ELEMENT_TYPE_ARRAY:        // all other arrays
-										// this is where we recursively follow
-			break;
-		default:
-			_ASSERTE(!"Unrecognized primitive type in ArrayHelper::TrySZIndexOf");
-	
 	}
-}
+			
+		break;
+	case ELEMENT_TYPE_OBJECT:
+		break;
+	case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+		break;
+	case ELEMENT_TYPE_ARRAY:        // all other arrays
+									// this is where we recursively follow
+		break;
+	default:
+		_ASSERTE(!"Unrecognized primitive type in ArrayHelper::TrySZIndexOf");
+	}
+} 
 
 void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int ioffset)
 {
-	Log((char*)mt->GetDebugClassName(),0,0,"cloneclass");
+#if DEBUG
+	//Log((char*)mt->GetDebugClassName(),0,0,"cloneclass");
+#endif
 	DWORD numInstanceFields = mt->GetNumInstanceFields();
 	if (numInstanceFields == 0) return;
 	FieldDesc *pSrcFields = mt->GetApproxFieldDescListRaw();
@@ -507,8 +597,11 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 		CorElementType type = f.GetFieldType();
 		DWORD offset = f.GetOffset() + ioffset;
 
+#ifdef DEBUG
 		LPCUTF8 szFieldName = f.GetDebugName();
-		Log((char*)szFieldName,0,0,"field");
+		//Log((char*)szFieldName,offset,0,"field");
+#endif
+
 
 		switch (type) {
 		case ELEMENT_TYPE_BOOLEAN:
@@ -531,7 +624,7 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 		{
 			
 			TypeHandle th = LoadExactFieldType(&pSrcFields[i], mt, GetAppDomain());
-			CloneClass((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), offset);
+			CloneClass((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), 0);
 		}
 		break;
 		case ELEMENT_TYPE_PTR:
@@ -548,16 +641,18 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 				void *pSrc = *(void **)((char*)src + offset);
 				if (pSrc != nullptr)
 				{
-					Log((char*)((Object*)pSrc)->GetMethodTable()->GetDebugClassName(), 0, 0, "field type (to clone)");
+#if DEBUG
+					//Log((char*)((Object*)pSrc)->GetMethodTable()->GetDebugClassName(), 0, 0, "field type (to clone)");
+#endif
 					void** rdst = (void**)((char*)dst + offset);
 					void* clone = ArenaMarshall((void*)rdst, pSrc);
 					*rdst = clone;
-					Log("memwriteptr", (size_t)rdst, (size_t)clone);
+					//Log("memwriteptr", (size_t)rdst, (size_t)clone);
 				}
 			}
 			break;
 		default:
-			Log("default", (size_t)type);
+			//Log("default", (size_t)type);
 			break;
 		}
 	}

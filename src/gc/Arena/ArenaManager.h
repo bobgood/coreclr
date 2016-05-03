@@ -22,7 +22,8 @@ class ArenaManager
 
 public:
 	// number of arenas to support (and provide address spaces for.)
-	static const int maxArenas = 1024;
+	// avoid very top of range >= 7f8'00000000
+	static const int maxArenas = 0x3f8;
 
 	// The amount of address space allocated per arena (1<<32 == 4GB)
 	static const int arenaAddressShift = 32;  // at most 4GB per arena total

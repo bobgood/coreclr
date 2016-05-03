@@ -1,7 +1,7 @@
 #pragma once
 // Hack
 
-#include "clrhost.h"
+#include "ArenaAllocator.h"
 
 #include <stdint.h>
 
@@ -16,31 +16,29 @@ namespace sfl
 	public:
 		critical_section()
 		{
-			// Hack
-			m_critsec = ClrCreateCriticalSection(CrstArenaAllocator, CRST_UNSAFE_ANYMODE);
+			m_locked = 0;
+			// Hack			
 		}
 
 
 		~critical_section()
 		{
-
-			ClrDeleteCriticalSection(m_critsec);
 		}
 
 
 		void lock()
 		{
-			ClrEnterCriticalSection(m_critsec);
+			while (1==::InterlockedCompareExchange(&m_locked, 1, 0));
 		}
 
 
 		void unlock()
 		{
-			ClrLeaveCriticalSection(m_critsec);
+			while (0==::InterlockedCompareExchange(&m_locked, 0, 1));
 		}
 
 	private:
-		CRITSEC_COOKIE m_critsec;
+		volatile unsigned int m_locked;
 	};
 
 

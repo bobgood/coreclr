@@ -440,11 +440,13 @@ LEAF_ENTRY JIT_CheckedWriteBarrier, _TEXT
         jb      NotInHeap
         cmp     rcx, [g_highest_address]
         jnb     NotInHeap
-        
+   InHeapOrArena:     
         jmp     JIT_WriteBarrier
 
     NotInHeap:
-        ; See comment above about possible AV
+		bt      rcx,42
+		jc		InHeapOrArena
+		; See comment above about possible AV
         mov     [rcx], rdx
         ret
 LEAF_END_MARKED JIT_CheckedWriteBarrier, _TEXT
@@ -468,7 +470,7 @@ NESTED_ENTRY JIT_WriteBarrier, _TEXT
 
 ifdef _DEBUG
         ; In debug builds, this just contains jump to the debug version of the write barrier by default
-        jmp     JIT_WriteBarrier_Debug
+        ;jmp     JIT_WriteBarrier_Debug
 endif
 		mov     rax, rdx
 		xor     rax,rcx
@@ -531,20 +533,22 @@ NotMixedArenaGC0:
         ret
 
 MixedArenaGC0:
-
-		mov rbx,rcx
+		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
         alloc_stack         20h
 
         END_PROLOGUE
+		
     
-        call                ArenaMarshall
+        mov                 rax, ArenaMarshall
+		call                rax
 
         add                 rsp, 20h
 		
         POP_CALLEE_SAVED_REGISTERS
-		mov     [rbx], rax
+		pop rcx
+		mov     [rcx], rax
 		ret
 
 

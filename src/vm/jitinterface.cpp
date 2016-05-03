@@ -10863,7 +10863,7 @@ InfoAccessType CEEJitInfo::constructStringLiteral(CORINFO_MODULE_HANDLE scopeHnd
     JIT_TO_EE_TRANSITION();
 
     _ASSERTE(ppValue != NULL);
-
+	START_NOT_ARENA_SECTION
     if (IsDynamicScope(scopeHnd))
     {
         *ppValue = (LPVOID)GetDynamicResolver(scopeHnd)->ConstructStringLiteral(metaTok);
@@ -10872,6 +10872,7 @@ InfoAccessType CEEJitInfo::constructStringLiteral(CORINFO_MODULE_HANDLE scopeHnd
     {
         *ppValue = (LPVOID)ConstructStringLiteral(scopeHnd, metaTok); // throws
     }
+	END_NOT_ARENA_SECTION
 
     EE_TO_JIT_TRANSITION();
 

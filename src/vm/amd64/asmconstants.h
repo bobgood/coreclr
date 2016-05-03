@@ -171,6 +171,10 @@ ASMCONSTANTS_C_ASSERT(OFFSET__Thread__m_alloc_context__alloc_ptr == offsetof(Thr
 #define               OFFSET__Thread__m_alloc_context__alloc_limit 0x68
 ASMCONSTANTS_C_ASSERT(OFFSET__Thread__m_alloc_context__alloc_limit == offsetof(Thread, m_alloc_context) + offsetof(alloc_context, alloc_limit));
 
+#define               OFFSET__Thread__m_arenaStack 1896
+//ASMCONSTANTS_C_ASSERT(OFFSET__Thread__m_arenaStack == offsetof(Thread, m_arenaStack));
+
+
 #define               OFFSETOF__ThreadExceptionState__m_pCurrentTracker 0x000
 ASMCONSTANTS_C_ASSERT(OFFSETOF__ThreadExceptionState__m_pCurrentTracker
                     == offsetof(ThreadExceptionState, m_pCurrentTracker));

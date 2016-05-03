@@ -451,7 +451,7 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	orArray->m_NumComponents = cElements;
 
 	if (bAllocateInLargeHeap ||
-		(totalSize >= LARGE_OBJECT_SIZE))
+		(totalSize >= LARGE_OBJECT_SIZE && !ISARENA(orArray)))
 	{
 		GCHeap::GetGCHeap()->PublishObject((BYTE*)orArray);
 	}
@@ -668,7 +668,7 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 			else
 			{
 				orObject = (ArrayBase*)Alloc(totalSize, FALSE, FALSE);
-				bPublish = (totalSize >= LARGE_OBJECT_SIZE);
+				bPublish = (totalSize >= LARGE_OBJECT_SIZE && !ISARENA(orObject));
 			}
 		}
 
@@ -886,7 +886,7 @@ STRINGREF SlowAllocateString(DWORD cchStringLength)
 	orObject->SetMethodTable(g_pStringClass);
 	orObject->SetStringLength(cchStringLength);
 
-	if (ObjectSize >= LARGE_OBJECT_SIZE)
+	if (ObjectSize >= LARGE_OBJECT_SIZE && !ISARENA(orObject))
 	{
 		GCHeap::GetGCHeap()->PublishObject((BYTE*)orObject);
 	}
@@ -1022,14 +1022,10 @@ OBJECTREF AllocateObject(MethodTable *pMT
 				pMT->ContainsPointers());
 		}
 
-		if (!orObject->HasEmptySyncBlockInfo())
-		{
-			// verify zero'd memory (at least for sync block)
-			_ASSERTE(orObject->HasEmptySyncBlockInfo());
-		}
+		// verify zero'd memory (at least for sync block)
+		_ASSERTE(orObject->HasEmptySyncBlockInfo());
 
-
-		if ((baseSize >= LARGE_OBJECT_SIZE))
+		if ((baseSize >= LARGE_OBJECT_SIZE && !ISARENA(orObject)))
 		{
 			orObject->SetMethodTableForLargeObject(pMT);
 			GCHeap::GetGCHeap()->PublishObject((BYTE*)orObject);

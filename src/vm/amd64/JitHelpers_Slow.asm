@@ -61,6 +61,17 @@ extern JIT_InternalThrow:proc
 ArenaMarshall equ ?ArenaMarshall@ArenaManager@@SAPEAXPEAX0@Z
 extern ArenaMarshall:proc
 
+; These should be in AsmConstants.inc, but I could not figure out how...
+ArenaAllocator_m_nextBlock_Offset          EQU 0
+ArenaAllocator_m_config_Offset             EQU 8
+ArenaAllocator_m_arenaBuffers              EQU 20h
+ArenaAllocator_Config_minBuffer_Offset     EQU 0
+ArenaAllocator_Config_maxBuffer_Offset     EQU 4
+ArenaAllocator_Config_addr_Offset          EQU 8
+ArenaAllocator_Config_maxArenaAlloc_Offset EQU 10h
+ArenaAllocator_Block_bufferIndex_Offset    EQU 0
+ArenaAllocator_Block_bufferOffset_Offset   EQU 4
+
 ifdef _DEBUG
 ; Version for when we're sure to be in the GC, checks whether or not the card
 ; needs to be updated
@@ -166,7 +177,8 @@ endif
 
         END_PROLOGUE
     
-        call                ArenaMarshall
+        mov                 rax, ArenaMarshall
+		call                rax
 
         add                 rsp, 20h
 
@@ -193,6 +205,9 @@ NESTED_ENTRY JIT_TrialAllocSFastMP, _TEXT
         mov     r8d, [rcx + OFFSET__MethodTable__m_BaseSize]
 
         ; m_BaseSize is guaranteed to be a multiple of 8.
+		mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation6
 
         mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
         mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
@@ -216,6 +231,54 @@ endif ; _DEBUG
     AllocFailed:
         add     rsp, MIN_SIZE
         jmp     JIT_NEW
+
+	ArenaAllocation6: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;rbx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort6
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+ArenaAbort6:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW
+
 NESTED_END JIT_TrialAllocSFastMP, _TEXT
 
 
@@ -236,6 +299,9 @@ NESTED_ENTRY JIT_BoxFastMP, _TEXT
         mov     r8d, [rcx + OFFSET__MethodTable__m_BaseSize]
 
         ; m_BaseSize is guaranteed to be a multiple of 8.
+		mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation7
 
         mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
         mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
@@ -289,6 +355,54 @@ endif ; _DEBUG
     AllocFailed:
         add     rsp, MIN_SIZE
         jmp     JIT_Box
+
+ArenaAllocation7: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;rbx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort7
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+ArenaAbort7:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW
+
 NESTED_END JIT_BoxFastMP, _TEXT
 
 
@@ -316,6 +430,10 @@ NESTED_ENTRY AllocateStringFastMP, _TEXT
         lea     r8d, [r8d + ecx*2 + 7]
         and     r8d, -8
 
+		mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation8
+
         mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
         mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
 
@@ -340,6 +458,54 @@ endif ; _DEBUG
     AllocFailed:
         add     rsp, MIN_SIZE
         jmp     FramedAllocateString
+
+ArenaAllocation8: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;rbx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort8
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+ArenaAbort8:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW
+
 NESTED_END AllocateStringFastMP, _TEXT
 
 FIX_INDIRECTION macro Reg
@@ -394,6 +560,10 @@ NESTED_ENTRY JIT_NewArr1VC_MP, _TEXT
         add     r8d, 7
         and     r8d, -8
 
+		mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation9
+
         mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
         mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
 
@@ -419,6 +589,54 @@ endif ; _DEBUG
     AllocFailed:
         add     rsp, MIN_SIZE
         jmp     JIT_NewArr1
+
+ArenaAllocation9: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;rbx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort9
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+ArenaAbort9:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW
+ 
 NESTED_END JIT_NewArr1VC_MP, _TEXT
 
 
@@ -459,6 +677,9 @@ NESTED_ENTRY JIT_NewArr1OBJ_MP, _TEXT
 
         ; No need for rounding in this case - element size is 8, and m_BaseSize is guaranteed
         ; to be a multiple of 8.
+		mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation10
 
         mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
         mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
@@ -484,6 +705,54 @@ endif ; _DEBUG
     AllocFailed:
         add     rsp, MIN_SIZE
         jmp     JIT_NewArr1
+
+ArenaAllocation10: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;rbx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort10
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+ArenaAbort10:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW
+
 NESTED_END JIT_NewArr1OBJ_MP, _TEXT
 
 

@@ -220,14 +220,26 @@ void WriteBarrierManager::ChangeWriteBarrierTo(WriteBarrierType newWriteBarrier)
 	auto p1 = (char*)GetCurrentWriteBarrierCode();
 		auto p2 = GetCurrentWriteBarrierSize();
 		auto p3 = (char*)JIT_WriteBarrier;
-    memcpy((PVOID)JIT_WriteBarrier, (LPVOID)GetCurrentWriteBarrierCode(), GetCurrentWriteBarrierSize());
-	for (int i = 0; i < p2; i++)
-	{
-		if (p1[i] != p3[i])
-		{
-			throw 0;
-		}
-	}
+    memcpy((PVOID)p3, (LPVOID)p1, p2);
+	//char buf[300];
+	//memcpy((PVOID)buf, (LPVOID)p1, p2);
+
+	//if (((size_t)p1 & 7) != 0 || ((size_t)p3 & 7) != 0)
+	//{
+	//	throw 0;
+	//}
+	//if (p3[0x6c] == 0xcc || buf[0x6c] == 0xcc)
+	//{
+	//	throw 0;
+	//}
+
+	//for (int i = 0; i < p2; i++)
+	//{
+	//	if (p1[i] != p3[i])
+	//	{
+	//		throw 0;
+	//	}
+	//}
 
     switch (newWriteBarrier)
     {

@@ -1,5 +1,5 @@
 
-
+#include "common.h"
 #include "SimpleHashSetBase.h"
 #include "assert.h"
 

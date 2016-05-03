@@ -117,7 +117,7 @@ namespace sfl
 #define ArenaAllocator_Config_addr_Offset 8
 #define ArenaAllocator_Config_maxArenaAlloc_Offset 0x10
 		/////////////////////////////////////////////////////////////////////////////
-
+#define offsetof(s,m)   (size_t)( (ptrdiff_t)&reinterpret_cast<const char&>((((s *)0)->m)) )
 		static_assert(offsetof(Config, minBuffer) == ArenaAllocator_Config_minBuffer_Offset, "minBuffer offset is not 0");
 		static_assert(offsetof(Config, maxBuffer) == ArenaAllocator_Config_maxBuffer_Offset, "maxBuffer offset is not 4");
 		static_assert(offsetof(Config, addr) == ArenaAllocator_Config_addr_Offset, "minBuffer offset is not 8");

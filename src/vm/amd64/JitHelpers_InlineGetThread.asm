@@ -59,7 +59,6 @@ extern FramedAllocateString:proc
 extern JIT_NewArr1:proc
  
 extern JIT_InternalThrow:proc
-extern ArenaControl_arena:ptr QWORD
 
 ifdef _DEBUG
 extern DEBUG_TrialAllocSetAppDomain:proc
@@ -72,19 +71,12 @@ endif
 LEAF_ENTRY JIT_TrialAllocSFastMP_InlineGetThread, _TEXT
         mov     edx, [rcx + OFFSET__MethodTable__m_BaseSize]
 
-
-    	;if (ArenaControl_arena == nullptr)
-		mov         eax,SECTIONREL ArenaControl_arena ;(07FFC07F62010h)+0F809E000h  
-		mov         r11d,dword ptr [_tls_index]  
-		mov         r10, qword ptr gs:[58h]  
-		mov         r11, qword ptr [r10+r11*8]  
-		mov         r10,qword ptr [rax+r11]
-		test        r10,r10
-		jne         ArenaAllocation
- 
         ; m_BaseSize is guaranteed to be a multiple of 8.
 
         PATCHABLE_INLINE_GETTHREAD r11, JIT_TrialAllocSFastMP_InlineGetThread__PatchTLSOffset
+		mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation
         mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
         mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
 
@@ -166,6 +158,9 @@ NESTED_ENTRY JIT_BoxFastMP_InlineGetThread, _TEXT
         ; m_BaseSize is guaranteed to be a multiple of 8.
 
         PATCHABLE_INLINE_GETTHREAD r11, JIT_BoxFastMPIGT__PatchTLSLabel
+		mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation2
         mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
         mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
 
@@ -215,188 +210,6 @@ align 16
     ClassNotInited:
     AllocFailed:
         jmp     JIT_Box
-NESTED_END JIT_BoxFastMP_InlineGetThread, _TEXT
-
-FIX_INDIRECTION macro Reg
-ifdef FEATURE_PREJIT
-        test    Reg, 1
-        jz      @F
-        mov     Reg, [Reg-1]
-    @@:
-endif
-endm
-
-LEAF_ENTRY AllocateStringFastMP_InlineGetThread, _TEXT
-        ; We were passed the number of characters in ECX
-
-        ; we need to load the method table for string from the global
-        mov     r9, [g_pStringClass]
-
-        ; Instead of doing elaborate overflow checks, we just limit the number of elements
-        ; to (LARGE_OBJECT_SIZE - 256)/sizeof(WCHAR) or less.
-        ; This will avoid avoid all overflow problems, as well as making sure
-        ; big string objects are correctly allocated in the big object heap.
-
-        cmp     ecx, (ASM_LARGE_OBJECT_SIZE - 256)/2
-        jae     OversizedString
-
-        mov     edx, [r9 + OFFSET__MethodTable__m_BaseSize]
-
-        ; Calculate the final size to allocate.
-        ; We need to calculate baseSize + cnt*2, then round that up by adding 7 and anding ~7.
-
-        lea     edx, [edx + ecx*2 + 7]
-        and     edx, -8
-
-        PATCHABLE_INLINE_GETTHREAD r11, AllocateStringFastMP_InlineGetThread__PatchTLSOffset
-        mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
-        mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
-
-        add     rdx, rax
-
-        cmp     rdx, r10
-        ja      AllocFailed
-
-        mov     [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr], rdx
-        mov     [rax], r9
-
-        mov     [rax + OFFSETOF__StringObject__m_StringLength], ecx
-
-ifdef _DEBUG
-        call    DEBUG_TrialAllocSetAppDomain_NoScratchArea
-endif ; _DEBUG
-
-        ret
-
-    OversizedString:
-    AllocFailed:
-        jmp     FramedAllocateString
-LEAF_END AllocateStringFastMP_InlineGetThread, _TEXT
-
-; HCIMPL2(Object*, JIT_NewArr1, CORINFO_CLASS_HANDLE arrayTypeHnd_, INT_PTR size)
-LEAF_ENTRY JIT_NewArr1VC_MP_InlineGetThread, _TEXT
-        ; We were passed a type descriptor in RCX, which contains the (shared)
-        ; array method table and the element type.
-
-        ; The element count is in RDX
-
-        ; NOTE: if this code is ported for CORINFO_HELP_NEWSFAST_ALIGN8, it will need
-        ; to emulate the double-specific behavior of JIT_TrialAlloc::GenAllocArray.
-
-        ; Do a conservative check here.  This is to avoid overflow while doing the calculations.  We don't
-        ; have to worry about "large" objects, since the allocation quantum is never big enough for
-        ; LARGE_OBJECT_SIZE.
-
-        ; For Value Classes, this needs to be 2^16 - slack (2^32 / max component size), 
-        ; The slack includes the size for the array header and round-up ; for alignment.  Use 256 for the
-        ; slack value out of laziness.
-
-        ; In both cases we do a final overflow check after adding to the alloc_ptr.
-
-        ; we need to load the true method table from the type desc
-        mov     r9, [rcx + OFFSETOF__ArrayTypeDesc__m_TemplateMT - 2]
-        
-        FIX_INDIRECTION r9
-
-        cmp     rdx, (65535 - 256)
-        jae     OversizedArray
-
-        movzx   r8d, word ptr [r9 + OFFSETOF__MethodTable__m_dwFlags]  ; component size is low 16 bits
-        imul    r8d, edx
-        add     r8d, dword ptr [r9 + OFFSET__MethodTable__m_BaseSize] 
-
-        ; round the size to a multiple of 8
-
-        add     r8d, 7
-        and     r8d, -8
-
-
-        PATCHABLE_INLINE_GETTHREAD r11, JIT_NewArr1VC_MP_InlineGetThread__PatchTLSOffset
-        mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
-        mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
-
-        add     r8, rax
-        jc      AllocFailed
-
-        cmp     r8, r10
-        ja      AllocFailed
-
-        mov     [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr], r8
-        mov     [rax], r9
-
-        mov     dword ptr [rax + OFFSETOF__ArrayBase__m_NumComponents], edx
-
-ifdef _DEBUG
-        call    DEBUG_TrialAllocSetAppDomain_NoScratchArea
-endif ; _DEBUG
-
-        ret
-
-    OversizedArray:
-    AllocFailed:
-        jmp     JIT_NewArr1
-LEAF_END JIT_NewArr1VC_MP_InlineGetThread, _TEXT
-
-
-; HCIMPL2(Object*, JIT_NewArr1, CORINFO_CLASS_HANDLE arrayTypeHnd_, INT_PTR size)
-LEAF_ENTRY JIT_NewArr1OBJ_MP_InlineGetThread, _TEXT
-        ; We were passed a type descriptor in RCX, which contains the (shared)
-        ; array method table and the element type.
-
-		;if (ArenaControl_arena == nullptr)
-		mov         eax,SECTIONREL ArenaControl_arena ;(07FFC07F62010h)+0F809E000h  
-		mov         r11d,dword ptr [_tls_index]  
-		mov         r10, qword ptr gs:[58h]  
-		mov         r11, qword ptr [r10+r11*8]  
-		mov         r10,qword ptr [rax+r11]
-		test        r10,r10
-		jne         ArenaAllocation2
-
-        ; The element count is in RDX
-        ; NOTE: if this code is ported for CORINFO_HELP_NEWSFAST_ALIGN8, it will need
-        ; to emulate the double-specific behavior of JIT_TrialAlloc::GenAllocArray.
-
-        ; Verifies that LARGE_OBJECT_SIZE fits in 32-bit.  This allows us to do array size
-        ; arithmetic using 32-bit registers.
-        .erre ASM_LARGE_OBJECT_SIZE lt 100000000h
-
-        cmp     rdx, (ASM_LARGE_OBJECT_SIZE - 256)/8 ; sizeof(void*)
-        jae     OversizedArray
-
-        ; we need to load the true method table from the type desc
-        mov     r9, [rcx + OFFSETOF__ArrayTypeDesc__m_TemplateMT - 2]
-        
-        FIX_INDIRECTION r9
-
-        ; In this case we know the element size is sizeof(void *), or 8 for x64
-        ; This helps us in two ways - we can shift instead of multiplying, and
-        ; there's no need to align the size either
-
-        mov     r8d, dword ptr [r9 + OFFSET__MethodTable__m_BaseSize]
-        lea     r8d, [r8d + edx * 8]
-
-        ; No need for rounding in this case - element size is 8, and m_BaseSize is guaranteed
-        ; to be a multiple of 8.
-
-        PATCHABLE_INLINE_GETTHREAD r11, JIT_NewArr1OBJ_MP_InlineGetThread__PatchTLSOffset
-        mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
-        mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
-
-        add     r8, rax
-
-        cmp     r8, r10
-        ja      AllocFailed
-
-        mov     [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr], r8
-        mov     [rax], r9
-
-        mov     dword ptr [rax + OFFSETOF__ArrayBase__m_NumComponents], edx
-
-ifdef _DEBUG
-        call    DEBUG_TrialAllocSetAppDomain_NoScratchArea
-endif ; _DEBUG
-
-        ret
 
 ArenaAllocation2: 
 		movd    xmm4, rcx  ; stash rcx
@@ -440,15 +253,345 @@ ArenaAllocation2:
 		mov     [rax], rcx
 		ret 
 		
-   
+ArenaAbort2:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW
+
+NESTED_END JIT_BoxFastMP_InlineGetThread, _TEXT
+
+FIX_INDIRECTION macro Reg
+ifdef FEATURE_PREJIT
+        test    Reg, 1
+        jz      @F
+        mov     Reg, [Reg-1]
+    @@:
+endif
+endm
+
+LEAF_ENTRY AllocateStringFastMP_InlineGetThread, _TEXT
+        ; We were passed the number of characters in ECX
+
+        ; we need to load the method table for string from the global
+        mov     r9, [g_pStringClass]
+
+        ; Instead of doing elaborate overflow checks, we just limit the number of elements
+        ; to (LARGE_OBJECT_SIZE - 256)/sizeof(WCHAR) or less.
+        ; This will avoid avoid all overflow problems, as well as making sure
+        ; big string objects are correctly allocated in the big object heap.
+
+        cmp     ecx, (ASM_LARGE_OBJECT_SIZE - 256)/2
+        jae     OversizedString
+
+        mov     edx, [r9 + OFFSET__MethodTable__m_BaseSize]
+
+        ; Calculate the final size to allocate.
+        ; We need to calculate baseSize + cnt*2, then round that up by adding 7 and anding ~7.
+
+        lea     edx, [edx + ecx*2 + 7]
+        and     edx, -8
+
+        PATCHABLE_INLINE_GETTHREAD r11, AllocateStringFastMP_InlineGetThread__PatchTLSOffset
+		mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation3
+        mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
+        mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
+
+        add     rdx, rax
+
+        cmp     rdx, r10
+        ja      AllocFailed
+
+        mov     [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr], rdx
+        mov     [rax], r9
+
+        mov     [rax + OFFSETOF__StringObject__m_StringLength], ecx
+
+ifdef _DEBUG
+        call    DEBUG_TrialAllocSetAppDomain_NoScratchArea
+endif ; _DEBUG
+
+        ret
+
+    OversizedString:
+    AllocFailed:
+        jmp     FramedAllocateString
+
+
+ArenaAllocation3: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;rbx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort3
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+ArenaAbort3:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW
+
+LEAF_END AllocateStringFastMP_InlineGetThread, _TEXT
+
+; HCIMPL2(Object*, JIT_NewArr1, CORINFO_CLASS_HANDLE arrayTypeHnd_, INT_PTR size)
+LEAF_ENTRY JIT_NewArr1VC_MP_InlineGetThread, _TEXT
+        ; We were passed a type descriptor in RCX, which contains the (shared)
+        ; array method table and the element type.
+
+        ; The element count is in RDX
+
+        ; NOTE: if this code is ported for CORINFO_HELP_NEWSFAST_ALIGN8, it will need
+        ; to emulate the double-specific behavior of JIT_TrialAlloc::GenAllocArray.
+
+        ; Do a conservative check here.  This is to avoid overflow while doing the calculations.  We don't
+        ; have to worry about "large" objects, since the allocation quantum is never big enough for
+        ; LARGE_OBJECT_SIZE.
+
+        ; For Value Classes, this needs to be 2^16 - slack (2^32 / max component size), 
+        ; The slack includes the size for the array header and round-up ; for alignment.  Use 256 for the
+        ; slack value out of laziness.
+
+        ; In both cases we do a final overflow check after adding to the alloc_ptr.
+
+        ; we need to load the true method table from the type desc
+        mov     r9, [rcx + OFFSETOF__ArrayTypeDesc__m_TemplateMT - 2]
+        
+        FIX_INDIRECTION r9
+
+        cmp     rdx, (65535 - 256)
+        jae     OversizedArray
+
+        movzx   r8d, word ptr [r9 + OFFSETOF__MethodTable__m_dwFlags]  ; component size is low 16 bits
+        imul    r8d, edx
+        add     r8d, dword ptr [r9 + OFFSET__MethodTable__m_BaseSize] 
+
+        ; round the size to a multiple of 8
+
+        add     r8d, 7
+        and     r8d, -8
+
+
+        PATCHABLE_INLINE_GETTHREAD r11, JIT_NewArr1VC_MP_InlineGetThread__PatchTLSOffset
+				mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation4
+
+        mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
+        mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
+
+        add     r8, rax
+        jc      AllocFailed
+
+        cmp     r8, r10
+        ja      AllocFailed
+
+        mov     [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr], r8
+        mov     [rax], r9
+
+        mov     dword ptr [rax + OFFSETOF__ArrayBase__m_NumComponents], edx
+
+ifdef _DEBUG
+        call    DEBUG_TrialAllocSetAppDomain_NoScratchArea
+endif ; _DEBUG
+
+        ret
+
     OversizedArray:
     AllocFailed:
         jmp     JIT_NewArr1
 
-		ArenaAbort2:
+	ArenaAllocation4: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;rbx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort4
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+ArenaAbort4:
+		movd rcx,xmm4
+		movd rbx,xmm5   
+	    jmp     JIT_NEW	
+LEAF_END JIT_NewArr1VC_MP_InlineGetThread, _TEXT
+
+
+; HCIMPL2(Object*, JIT_NewArr1, CORINFO_CLASS_HANDLE arrayTypeHnd_, INT_PTR size)
+LEAF_ENTRY JIT_NewArr1OBJ_MP_InlineGetThread, _TEXT
+        ; We were passed a type descriptor in RCX, which contains the (shared)
+        ; array method table and the element type.
+
+		
+        ; The element count is in RDX
+        ; NOTE: if this code is ported for CORINFO_HELP_NEWSFAST_ALIGN8, it will need
+        ; to emulate the double-specific behavior of JIT_TrialAlloc::GenAllocArray.
+
+        ; Verifies that LARGE_OBJECT_SIZE fits in 32-bit.  This allows us to do array size
+        ; arithmetic using 32-bit registers.
+        .erre ASM_LARGE_OBJECT_SIZE lt 100000000h
+
+        cmp     rdx, (ASM_LARGE_OBJECT_SIZE - 256)/8 ; sizeof(void*)
+        jae     OversizedArray
+
+        ; we need to load the true method table from the type desc
+        mov     r9, [rcx + OFFSETOF__ArrayTypeDesc__m_TemplateMT - 2]
+        
+        FIX_INDIRECTION r9
+
+        ; In this case we know the element size is sizeof(void *), or 8 for x64
+        ; This helps us in two ways - we can shift instead of multiplying, and
+        ; there's no need to align the size either
+
+        mov     r8d, dword ptr [r9 + OFFSET__MethodTable__m_BaseSize]
+        lea     r8d, [r8d + edx * 8]
+
+        ; No need for rounding in this case - element size is 8, and m_BaseSize is guaranteed
+        ; to be a multiple of 8.
+
+        PATCHABLE_INLINE_GETTHREAD r11, JIT_NewArr1OBJ_MP_InlineGetThread__PatchTLSOffset
+		mov     r10, [r11 + OFFSET__Thread__m_arenaStack];
+		test    r10,r10
+		jne     ArenaAllocation5
+        mov     r10, [r11 + OFFSET__Thread__m_alloc_context__alloc_limit]
+        mov     rax, [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr]
+
+        add     r8, rax
+
+        cmp     r8, r10
+        ja      AllocFailed
+
+        mov     [r11 + OFFSET__Thread__m_alloc_context__alloc_ptr], r8
+        mov     [rax], r9
+
+        mov     dword ptr [rax + OFFSETOF__ArrayBase__m_NumComponents], edx
+
+ifdef _DEBUG
+        call    DEBUG_TrialAllocSetAppDomain_NoScratchArea
+endif ; _DEBUG
+
+        ret
+
+ArenaAllocation5: 
+		movd    xmm4, rcx  ; stash rcx
+		movd    xmm5, rbx  ; stash rbx
+	ContentionRetry:
+	;edx contains lengths.  r10 points to arenaallocator object
+	    mov     rcx,[r10+ArenaAllocator_m_nextBlock_Offset] 
+    ;ecx contains the full block record.  block index in ebx, and offset in upper 
+		mov     eax,[r10+ArenaAllocator_m_config_Offset+ArenaAllocator_Config_minBuffer_Offset]
+		shl     eax,cl
+	;eax contains the size of the buffer
+		mov     ebx,[r10+ArenaAllocator_m_nextBlock_Offset+ArenaAllocator_Block_bufferOffset_Offset] 
+		add     ebx, edx
+	;rbx holds the proposed end of the buffer if the allocation is taken.
+	    cmp     ebx,eax
+		jge      ArenaAbort5
+	;We fit
+		shl     rbx,32 ; the offset is the upper word
+		mov     eax,ecx ;  the lower word is unchanged, so go get it
+		or      rbx, rax  ; or the lower word with the upper word
+    ;ebx contains new block record to try compareandexchange        
+	
+		mov rax,rcx
+	;rax contains the original value before possible exchange
+		 lock cmpxchg qword ptr [r10+ArenaAllocator_m_nextBlock_Offset],rbx
+    ;thread contention, retry
+		 jnz ContentionRetry
+    ;the memory is reserved, find the pointer
+		 mov ecx,ebx ; the buffer index
+		 shl ecx,3 ; of void* ptrs
+		 add rcx,r10
+		 mov rbx,[rcx+ArenaAllocator_m_arenaBuffers]
+    ;rbx points to the buffer
+	     shr rax,32  
+    ;eax contains offset
+		 add rax,rbx;
+    ;rax is the memory location of the allocated memory
+		movd rcx,xmm4
+		movd rbx,xmm5  
+	; the object type goes in the first location?
+		mov     [rax], rcx
+		ret 
+		
+   
+
+		ArenaAbort5:
 		movd rcx,xmm4
 		movd rbx,xmm5   
 	    jmp     JIT_NEW
+
+		
+    OversizedArray:
+    AllocFailed:
+        jmp     JIT_NewArr1
 LEAF_END JIT_NewArr1OBJ_MP_InlineGetThread, _TEXT
 
 
