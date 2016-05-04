@@ -327,9 +327,15 @@ namespace sfl
 					}
 				}
 
-				LPVOID addr = ClrVirtualAlloc((LPVOID)requestAddress, size, MEM_COMMIT, PAGE_READWRITE);		
+				LPVOID addr = ClrVirtualAlloc((LPVOID)requestAddress, size, MEM_COMMIT, PAGE_READWRITE);
+				if (((size_t)addr & 0xff000000) != 0)
+				{
+					//::ArenaManager::Log("VirtualAlloc+", (size_t)addr, size);
+				}
+				//::ArenaManager::Log("VirtualAlloc", (size_t)addr, size);
 				if ((size_t)addr != requestAddress)
 				{
+					//::ArenaManager::Log("VirtualAlloc Fail", (size_t)addr, (size_t)requestAddress);
 					if (addr == 0)
 					{
 						int err = GetLastError();
@@ -339,12 +345,12 @@ namespace sfl
 						throw "ClrVirtualAlloc memory collision";
 					}
 				}
-
+				InterlockedAdd64(&(::ArenaManager::totalMemory), size);
 				return addr;
 			}
 			else
 			{
-				// Increase the size of the arena buffers exponentially  
+				// Iyuyncrease the size of the arena buffers exponentially  
 				return operator new(size);
 			}
 		}
@@ -353,7 +359,14 @@ namespace sfl
 		{
 			if (m_virtualAddress > 0)
 			{
-				ClrVirtualFree(addr, size, MEM_RELEASE);
+				//::ArenaManager::Log("VirtualFree", (size_t)addr, (size_t)size);
+				DWORD ok = ClrVirtualFree(addr, size, MEM_DECOMMIT);
+				if (!ok)
+				{
+					DWORD v = GetLastError();
+					//::ArenaManager::Log("error", (size_t)v);
+				}
+				InterlockedAdd64(&(::ArenaManager::totalMemory), -(__int64)size);
 			}
 			else
 			{
@@ -392,14 +405,13 @@ namespace sfl
 			// while it is in use is a fatal bug regardless of concurrency.
 
 			// Free arena buffers
-			assert(!m_arenaBuffers.empty());
-			for (size_t i = bufferToKeep; i < m_arenaBuffers.size(); i++)
+			
+			for (size_t i = bufferToKeep==0?1:bufferToKeep; i < m_arenaBuffers.size(); i++)
 			{
 				size_t size = m_config.minBuffer << i;
 				DeallocateBuffer(m_arenaBuffers[i], size);
 			}
 
-			m_arenaBuffers.resize(bufferToKeep);
 
 			// Free the overflow buffers
 
@@ -410,6 +422,18 @@ namespace sfl
 
 			m_overflowBuffers.resize(0);
 			m_overflowBufferLengths.resize(0);
+
+			if (bufferToKeep == 0 && m_arenaBuffers.size()>0)
+			{
+				size_t size = m_config.minBuffer ;
+				DeallocateBuffer(m_arenaBuffers[0], size);
+			}
+			else 
+			{
+				// if all of the buffers are gone, so is the allocator, so no need to resize the array
+				m_arenaBuffers.resize(bufferToKeep);
+			}
+
 		}
 
 

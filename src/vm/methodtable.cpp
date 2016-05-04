@@ -3254,7 +3254,9 @@ OBJECTREF MethodTable::AllocateStaticBox(MethodTable* pFieldMT, BOOL fPinned, OB
     // Activate any dependent modules if necessary
     pFieldMT->EnsureInstanceActive();
 
+	//START_NOT_ARENA_SECTION
     OBJECTREF obj = AllocateObject(pFieldMT);
+	//END_NOT_ARENA_SECTION
 
     // Pin the object if necessary
     if (fPinned)

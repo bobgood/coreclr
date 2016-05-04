@@ -1456,6 +1456,13 @@ void SetObjectReferenceChecked(OBJECTREF *dst,OBJECTREF ref,AppDomain *pAppDomai
 
 void SetObjectReferenceUnchecked(OBJECTREF *dst,OBJECTREF ref)
 {
+	if (ISARENA(dst)? !ISSAMEARENA(dst, ref) : ISARENA(ref))
+	{
+		auto ref2 = ::ArenaManager::ArenaMarshall(dst, ref);
+		VolatileStore((Object**)dst, OBJECTREFToObject(ref2));
+		return;
+	} 
+
     STATIC_CONTRACT_NOTHROW;
     STATIC_CONTRACT_GC_NOTRIGGER;
     STATIC_CONTRACT_FORBID_FAULT;

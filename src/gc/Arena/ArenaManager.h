@@ -24,12 +24,14 @@ public:
 	// number of arenas to support (and provide address spaces for.)
 	// avoid very top of range >= 7f8'00000000
 	static const int maxArenas = 0x3f8;
+	static const int ArenaMask = 0x3ff;
 
 	// The amount of address space allocated per arena (1<<32 == 4GB)
 	static const int arenaAddressShift = 32;  // at most 4GB per arena total
+	static const int addressBits = 43;
 
 											  // The base address of arenas (to distinguish arenas from other memory)
-	static const size_t arenaBaseRequest = 1ULL << 42; // half of virtual address space reserved for arenas
+	static const size_t arenaBaseRequest = 1ULL << (addressBits-1); // half of virtual address space reserved for arenas
 	static const size_t arenaRangeEnd = arenaBaseRequest + ((size_t)maxArenas << arenaAddressShift);
 
 	// Minimum and maximum size of buffers allocated to arenas (each new buffer is twice the size of the prior)
@@ -50,6 +52,10 @@ private:
 	static unsigned long refCount[maxArenas];
 	static void* arenaById[maxArenas];
 
+public:
+	static volatile __int64 totalMemory;
+
+private:
 	static Arena* MakeArena();
 
 	// Should be the same as arenaBaseRequest.  This is the actual location in virtual memory for all arenas.
@@ -123,7 +129,14 @@ public:
 	static void* ArenaMarshall(void*, void*);
 
 	static bool IsArenaAddress(void*p) {
-		size_t a = (size_t)p; return (a >= arenaBaseRequest && a < arenaRangeEnd);
+		size_t a = (size_t)p;
+		//return (0 != _bittest64((LONG64*)&a, addressBits - 1));
+		 return (a >= arenaBaseRequest);
+	}
+
+	static bool IsSameArenaAddress(void*p, void*q) {
+		size_t a = ((size_t)p ^ (size_t)q) >> 32;
+		return a == 0;
 	}
 
 	// Deep clones the src object, and returns a pointer.  The clone is done into the allocator
@@ -138,9 +151,10 @@ public:
 
 
 #define ISARENA(x) ::ArenaManager::IsArenaAddress(x)
+#define ISSAMEARENA(x,y) ::ArenaManager::IsSameArenaAddress(x,y)
 
 
 #define START_NOT_ARENA_SECTION ::ArenaManager::PushGC();
 #define END_NOT_ARENA_SECTION ::ArenaManager::Pop();
 
-extern void* _stdcall ArenaMarshall(void*, void*);
+//extern void* _stdcall ArenaMarshall(void*, void*);

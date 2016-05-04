@@ -402,6 +402,12 @@ void log_va_msg(const char *fmt, va_list args)
     buffer_start += pid_len;
     memset(&pBuffer[buffer_start], '-', BUFFERSIZE - buffer_start);
     int msg_len = _vsnprintf(&pBuffer[buffer_start], BUFFERSIZE - buffer_start, fmt, args );
+	if (msg_len > 0)
+	{
+		DWORD written;
+		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), pBuffer, (DWORD)msg_len, &written, 0);
+		return;
+	}
     if (msg_len == -1)
     {
         msg_len = BUFFERSIZE - buffer_start;

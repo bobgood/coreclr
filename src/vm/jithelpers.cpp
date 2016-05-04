@@ -2882,7 +2882,7 @@ HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
 		void* p = ::ArenaManager::Allocate(size);
 		if (p != nullptr)
 		{
-			::ArenaManager::Log("JIT_NewS_MP_FastPortable arena",(size_t)p);
+			//::ArenaManager::Log("JIT_NewS_MP_FastPortable arena",(size_t)p);
 		}
 		else {
 
@@ -2897,7 +2897,7 @@ HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
 
 			_ASSERTE(allocPtr != nullptr);
 			p = allocPtr;
-			::ArenaManager::Log("JIT_NewS_MP_FastPortable GC", (size_t)p);
+			//::ArenaManager::Log("JIT_NewS_MP_FastPortable GC", (size_t)p);
 		}
         Object *object = reinterpret_cast<Object *>(p);
         _ASSERTE(object->HasEmptySyncBlockInfo());
