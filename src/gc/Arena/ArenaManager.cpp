@@ -1,20 +1,15 @@
 // Hack
 #include "../common.h"
 #include "arenaManager.h"
-#include "ArenaAllocator.h"
+#include "Arena.h"
 #include "ArenaHeader.h"
 #include "vector.h"
-#include "../tls.h"
 #include "../object.h"
-
-#define FEATURE_IMPLICIT_TLS
-
-// thread_local data. 
-// TlsIdx_ArenaStack,
-//
-//#include "threads.h"
-//static const int v = offsetof(Thread, m_arenaStack);
-//static_assert(v == 1896, "v is not 1896");
+#include <windows.h>
+#include <tchar.h>
+#include <stdio.h>
+#include <strsafe.h>
+#include "class.h"
 
 size_t ArenaManager::virtualBase;
 TypeHandle LoadExactFieldType(FieldDesc *pFD, MethodTable *pEnclosingMT, AppDomain *pDomain);
@@ -29,9 +24,12 @@ unsigned int ArenaManager::lastId = 0;
 void* ArenaManager::arenaById[maxArenas];
 unsigned long ArenaManager::refCount[maxArenas];
 volatile __int64 ArenaManager::totalMemory = 0;
+HANDLE ArenaManager::hFile = 0;
 
 void ArenaManager::InitArena()
 {
+
+
 	for (int i = 0; i < maxArenas; i++)
 	{
 		arenaById[i] = nullptr;
@@ -48,26 +46,38 @@ void ArenaManager::InitArena()
 
 void ArenaManager::DereferenceId(int id)
 {
+
+
 	if (arenaById[id] == nullptr)
 	{
+		Log("*arenaError", id);
 		assert(arenaById[id]);
 	}
 	unsigned long& r = refCount[id];
 	assert(r > 0);
 	if (0 == InterlockedDecrement(&r))
 	{
+		//Log("Arena is deleted", id, (size_t)arenaById[id]);
 		auto arena = arenaById[id];
 		arenaById[id] = nullptr;
 		DeleteAllocator(arena);
-		//Log("Arena is deleted", (size_t)arena);
+
 	}
 }
 
 void ArenaManager::ReferenceId(int id)
 {
-	assert(arenaById[id]);
+	if (arenaById[id] == nullptr)
+	{
+		Log("*arenaError", id);
+		assert(arenaById[id]);
+	}
 	unsigned long& r = refCount[id];
-	assert(r > 0);
+	if (r <= 0)
+	{
+		Log("*refcount error");
+		assert(r > 0);
+	}
 	InterlockedIncrement(&r);
 }
 
@@ -111,7 +121,7 @@ int _cdecl ArenaManager::GetArenaId()
 void _cdecl ArenaManager::SetAllocator(unsigned int type)
 {
 	ArenaStack& arenaStack = GetArenaStack();
-	Arena* current_arena;
+	ArenaThread* current_arena;
 	switch (type)
 	{
 	case 1:
@@ -123,14 +133,14 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 		arenaStack.Reset();
 		break;
 	case 2:
-		current_arena = MakeArena();
+		current_arena = MakeArena()->BaseArenaThread();
 		//{
 		//	DWORD written;
 		//	char bufn[25];
 		//	_itoa((size_t)current_arena>>32, bufn, 16);
 
-		//	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
-		//	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "Arena\n", (DWORD)strlen("Arena\n"), &written, 0);
+		//	WriteFile(hFile, bufn, (DWORD)strlen(bufn), &written, 0);
+		//	WriteFile(hFile, "Arena\n", (DWORD)strlen("Arena\n"), &written, 0);
 
 		//}
 		arenaStack.Push(current_arena);
@@ -146,10 +156,18 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 	case 4:
 		Pop();
 		break;
+	case 5:
+		Pop();
+		break;
 	default:
-		assert(type >= 1024 && type < (1024 + maxArenas));
+		if (!(type >= 1024 && type < (1024 + maxArenas)))
+		{
+			Log("*error type", type);
+			return;
+		}
 		ReferenceId(type - 1024);
-		current_arena = (Arena*)arenaById[type - 1024];
+		//Log("Arena Reference to spawn", type - 1024,(size_t)(arenaById[type - 1024]));
+		current_arena = ((Arena*)arenaById[type - 1024])->SpawnArenaThread();
 		assert(current_arena != nullptr);
 		arenaStack.Push(current_arena);
 		//Log("Arena reuse Push", arenaStack.Size());
@@ -160,29 +178,13 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 	}
 }
 
-ArenaHeader& GetHeaderFromAddress(void* address)
-{
-	size_t a = (size_t)address;
-	a &= ~((1ULL << ArenaManager::arenaAddressShift) - 1);
-	return *(ArenaHeader*)a;
-}
-
 
 Arena* ArenaManager::MakeArena()
 {
 	unsigned int id = getId();
-	Arena stackArena(Arena::Config(minBufferSize, maxBufferSize, IdToAddress(id)));
-	ArenaHeader* header = (ArenaHeader*)stackArena.Allocate(sizeof(ArenaHeader));
-	new (header)ArenaHeader(std::move(stackArena));
-	header->m_arena.PropagateAllocators();
-	Arena*arena = &(header->m_arena);
-	//Log("Arena is about to be registered ", (size_t)arena);
+	Arena* arena = Arena::MakeArena(IdToAddress(id));
+	//Log("Arena is registered ", (size_t)arena);
 	arenaById[id] = arena;
-
-	// because we moved the header, the buffers no longer belong to the stackArena, and
-	// we do not want the buffers deleted, so set the stackArena to believe it owns no buffers.
-	stackArena.m_arenaBuffers.Reset();
-	stackArena.m_overflowBuffers.Reset();
 	return arena;
 }
 
@@ -203,76 +205,12 @@ void _cdecl ArenaManager::Pop()
 	{
 		DereferenceId(Id(allocator));
 		//Log("Arena Pop", GetArenaStack().Size());
-		if (GetArenaStack().Size() > 3)
-		{
-			//Log("over GC Pop", GetArenaStack().Size());
-		}
 	}
 	else {
 		//Log("GC Pop", GetArenaStack().Size());
 	}
 }
 
-ObjectHashTable& ArenaManager::FindCloneTable(void* src, void* target)
-{
-	// There needs to be a hashtable that keeps track of every clone that occurs between each pair of allocators.
-	// the hash table is always stored in the arena with the highest address.  So each hashtable contains both the
-	// clones from A to B and also the clones from B to A.
-	// one of the two allocators may be the GC allocator, but these objects will always have the lowest address, so the
-	// hash table will still be built into an arena allocators header.
-	// each header contains an array with entries for the maximum number of allowed arenas. 
-	// example:  If a clone from arena 3 was made in arena 8, then slot #3 in in the header for arena 8 contains all
-	// clones made from 8 to 3 and from 3 to 8.
-	// Whenever a clone is made from (or to) the GC for example to arena 22, there is no slot number for the GC, so
-	// slot 22 in arena 22 is reserved for cloning between 22 and the GC.
-	//
-	// If an allocator 17 is deleted, all of his clone hash tables will be deleted.  We also need to go through all of the other
-	// arena headers, and delete the table in slot 17 for each one.  (deleting an object in an arena simply means setting the pointer
-	// to zero.)
-	//
-	// Clone tables are necessary to make sure the same object is not cloned repeatedly, and that linked objects will have the links go
-	// to a single clone, rather than create bugs by having different links go to different clones.
-
-	// master is the allocator that will hold the clone table for this pair of addresss.  
-	// The target address can be any address in the range covered by the allocator when checking for a clone,
-	// but once found in the clone table, the target address is the address of the clone for the target allocator.
-	void *master = (src < target) ? target : src;
-	void *slave = (src > target) ? target : src;
-	if (slave < (void*)arenaBaseRequest)
-	{
-		slave = master;
-	}
-	int id = Id(slave);
-
-
-	auto header = GetHeaderFromAddress(master);
-	if (header.clones[id] == nullptr)
-	{
-		header.clones[id] = ObjectHashTable::Create(header.m_arena);
-	}
-	return *header.clones[id];
-}
-
-Object* ArenaManager::FindClone(void* src, void* target)
-{
-	auto cloneTable = FindCloneTable(src, target);
-	bool found;
-	Object* clone = cloneTable.Find((Object*)src, found);
-	if (found)
-	{
-		return clone;
-	}
-	else
-	{
-		return nullptr;
-	}
-}
-
-bool ArenaManager::SetClone(void* src, void* target)
-{
-	auto cloneTable = FindCloneTable(src, target);
-	return cloneTable.Set((Object*)src, (Object*)target);
-}
 
 void* ArenaManager::GetArena()
 {
@@ -281,7 +219,7 @@ void* ArenaManager::GetArena()
 
 unsigned int ArenaManager::Id(void * allocator)
 {
-	return (((Arena*)allocator)->m_config.addr >> arenaAddressShift) & (ArenaMask);
+	return (((size_t)allocator) >> arenaAddressShift) & (ArenaMask);
 }
 
 void ArenaManager::DeleteAllocator(void* vallocator)
@@ -290,17 +228,6 @@ void ArenaManager::DeleteAllocator(void* vallocator)
 
 	int id = Id(vallocator);
 	Arena* allocator = static_cast<Arena*> (vallocator);
-
-	// dispose of clone cache items for disposed arena
-	for (int i = 0; i < maxArenas; i++)
-	{
-		Arena* a = (Arena*)arenaById[i];
-		if (a != nullptr)
-		{
-			ArenaHeader* h = (ArenaHeader*)a;
-			h->clones[id] = nullptr;
-		}
-	}
 
 	// do not need to delete, because arena object is embedded in arena memory.
 	allocator->Destroy();
@@ -317,14 +244,24 @@ inline void* ArenaManager::AllocatorFromAddress(void * addr)
 	size_t iaddr = (size_t)addr;
 	if (iaddr < arenaBaseRequest) return nullptr;
 	unsigned int id = (iaddr >> arenaAddressShift) & ArenaMask;
+	//Log("LookupId", id, (size_t)arenaById[id]);
 	return arenaById[id];
 }
 
+void* ArenaManager::Peek()
+{
+	ArenaThread* arena = (ArenaThread*)GetArenaStack().Current();
+	if (arena == nullptr)
+	{
+		return nullptr;
+	}
+	return (arena)->Allocate(0);
+}
 int cnty = 0;
 int cntx = 0;
 void* ArenaManager::Allocate(size_t jsize)
 {
-	Arena* arena = (Arena*)GetArenaStack().Current();
+	ArenaThread* arena = (ArenaThread*)GetArenaStack().Current();
 	if (arena == nullptr)
 	{
 		return nullptr;
@@ -332,12 +269,15 @@ void* ArenaManager::Allocate(size_t jsize)
 
 	size_t size = Align(jsize) + headerSize;
 	void*ret = (arena)->Allocate(size);
-	
+	if ((size_t)ret >= 0x40100010000)
+	{
+		//Log("trigger", (size_t)ret);
+	}
 	//	memset(ret, 0, size); it already is zero
 	return (void*)((char*)ret + headerSize);
 }
 
-void* ArenaManager::Allocate(Arena* arena, size_t jsize)
+void* ArenaManager::Allocate(ArenaThread* arena, size_t jsize)
 {
 	size_t size = Align(jsize) + headerSize;
 	void*ret = (arena)->Allocate(size);
@@ -345,125 +285,147 @@ void* ArenaManager::Allocate(Arena* arena, size_t jsize)
 	return (void*)((char*)ret + headerSize);
 }
 
-int lcnt = 0;
+int ArenaManager::lcnt = 0;
 volatile DWORD spinlock;
 int lockdep = 0;
-void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr)
+void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr, size_t n3)
 {
 	return;
-	int spinCnt = 0;
+	if (hFile == (HANDLE)0xffffffff || hFile == 0)
+	{
+		hFile = GetStdHandle(STD_OUTPUT_HANDLE);
+		//hFile = ::CreateFileA("log.txt",                // name of the write
+		//	GENERIC_WRITE,          // open for writing
+		//	FILE_SHARE_READ,                      // do not share
+		//	NULL,                   // default security
+		//	CREATE_ALWAYS,             // create new file only
+		//	FILE_ATTRIBUTE_NORMAL,  // normal file
+		//	NULL);                  // no attr. template
+	}
+
 	auto tid = GetCurrentThreadId();
 
-	for (;;)
+	auto& arenaStack = GetArenaStack();
+	if (*str == '*')
 	{
-		auto was = ::InterlockedCompareExchange(&spinlock, tid, 0);
-		if (was == 0)
-		{
-			lockdep = 0;
-			break;
-		}
-		if (was == tid)
-		{
-			lockdep++;
-			break;
-		}
+		tid = GetCurrentThreadId();
 	}
 
-	auto& arenaStack = GetArenaStack();
-
-
-
+	char pbuf[1024];
+	size_t pbufI = 0;
 	DWORD written;
-	char bufn[25];
-	_itoa(lcnt++, bufn, 10);
 
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "[", (DWORD)strlen("["), &written, 0);
-	_itoa(tid, bufn, 10);
+	_itoa(lcnt++, pbuf, 10);
+	pbufI = strlen(pbuf);
+	pbuf[pbufI++] = '[';
 
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
-	_itoa(arenaStack.Size(), bufn, 10);
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "@", (DWORD)strlen("@"), &written, 0);
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
-	if (arenaStack.Current() != nullptr)WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "#", (DWORD)strlen("#"), &written, 0);
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "] Log ", (DWORD)strlen("] Log "), &written, 0);
+	_itoa(tid, pbuf + pbufI, 10);
+	pbufI = strlen(pbuf);
+
+	pbuf[pbufI++] = '@';
+	_itoa(arenaStack.Size(), pbuf + pbufI, 10);
+	pbufI = strlen(pbuf);
+	if (arenaStack.Current() != nullptr)
+
+	{
+		pbuf[pbufI++] = '#';
+	}
+
+	pbuf[pbufI++] = ']';
+	pbuf[pbufI++] = ' ';
+	pbuf[pbufI++] = 'L';
+	pbuf[pbufI++] = 'o';
+	pbuf[pbufI++] = 'g';
+	pbuf[pbufI++] = ' ';
+
 	if (hdr != nullptr)
 	{
-		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), hdr, (DWORD)strlen(hdr), &written, 0);
-		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), " = ", (DWORD)strlen(" = "), &written, 0);
+		memcpy(pbuf + pbufI, hdr, strlen(hdr));
+		pbufI += strlen(hdr);
+		pbuf[pbufI++] = ' ';
+		pbuf[pbufI++] = '=';
+		pbuf[pbufI++] = ' ';
 	}
 
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), str, (DWORD)strlen(str), &written, 0);
+	memcpy(pbuf + pbufI, str, strlen(str));
+	pbufI += strlen(str);
+
 	if (n != 0)
 	{
-		char buf[25];
-		buf[0] = ':'; buf[1] = ' ';
-		buf[2] = '0'; buf[3] = 'x';
-		_ui64toa(n, buf + 4, 16);
-		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, (DWORD)strlen(buf), &written, 0);
+		pbuf[pbufI++] = ':';
+		pbuf[pbufI++] = ' ';
+		pbuf[pbufI++] = '0';
+		pbuf[pbufI++] = 'x';
+		_ui64toa(n, pbuf + pbufI, 16);
+		pbufI = strlen(pbuf);
 	}
+
 	if (n2 != 0)
 	{
-		char buf[25];
-		buf[0] = ' '; buf[1] = '-';
-		buf[2] = '>'; buf[3] = ' ';
-		buf[4] = '0'; buf[5] = 'x';
-		_ui64toa(n2, buf + 6, 16);
-		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), buf, (DWORD)strlen(buf), &written, 0);
+		pbuf[pbufI++] = ' ';
+		pbuf[pbufI++] = '-';
+		pbuf[pbufI++] = '>';
+		pbuf[pbufI++] = ' ';
+		pbuf[pbufI++] = '0';
+		pbuf[pbufI++] = 'x';
+		_ui64toa(n2, pbuf + pbufI, 16);
+		pbufI = strlen(pbuf);
 	}
-	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "\n", (DWORD)strlen("\n"), &written, 0);
-	if (lockdep-- <= 0)
+
+	if (n3 != 0)
 	{
-		spinlock = 0;
+		pbuf[pbufI++] = ' ';
+		pbuf[pbufI++] = '@';
+		pbuf[pbufI++] = '>';
+		pbuf[pbufI++] = ' ';
+		pbuf[pbufI++] = '0';
+		pbuf[pbufI++] = 'x';
+		_ui64toa(n3, pbuf + pbufI, 16);
+		pbufI = strlen(pbuf);
 	}
+
+	pbuf[pbufI++] = '\n';
+
+	WriteFile(hFile, pbuf, (DWORD)pbufI, &written, 0);
+	if (lcnt == 163)
+	{
+		printf("\ntrigger\n\n");
+	}
+	//FlushFileBuffers(hFile);
 }
+
+#define header(i) ((CObjectHeader*)(i))
+bool show = false;
 
 alloc_context* GetThreadAllocContext();
 
 volatile DWORD spinlock2 = 0;
 int lockdepth = 0;
-
+#define ROUNDSIZE(x) (((size_t)(x)+7)&~7)
 void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 {
 	if (vsrc == nullptr) return nullptr;
-	auto tid = GetCurrentThreadId();
-	for (;;)
-	{
-		auto was = ::InterlockedCompareExchange(&spinlock2, tid, 0);
-		if (was == 0)
-		{
-			lockdepth = 0;
-			break;
-		}
-		if (was == tid)
-		{
-			lockdepth++;
-			break;
-		}
-	}
-	//cntx++;
-	//
-	//if (cntx % 100 == 0 || cntx>9100)
-	//{
-	//	DWORD written;
-	//	char bufn[25];
-	//	_itoa(cntx, bufn, 10);
 
-	//	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), bufn, (DWORD)strlen(bufn), &written, 0);
-	//	WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), "M\n", (DWORD)strlen("M\n"), &written, 0);
-
-	//}
-
-
-
-
-// src Allocator is not used
+	// src Allocator is not used
 	Arena* srcAllocator = (Arena*)AllocatorFromAddress(vsrc);
 	Arena* dstAllocator = (Arena*)AllocatorFromAddress(vdst);
 
+	// overrunning allocator... ignore.
+	if (srcAllocator != nullptr && dstAllocator != nullptr) return vsrc;
 	Object* src = (Object*)vsrc;
-	size_t size = src->GetSize();
 
+	MethodTable* mT;
+	size_t cnt = 0;
+	mT = src->GetMethodTable();
+	DefineFullyQualifiedNameForClass();
+	char* name = (char*)GetFullyQualifiedNameForClass(mT);
+	cnt = (mT->GetBaseSize() +
+		(mT->HasComponentSize() ?
+			((size_t)(src->GetNumComponents() * mT->RawGetComponentSize())) : 0));
+
+	size_t size = ROUNDSIZE(cnt) + sizeof(Object) + headerSize;
+	if (name[7] == 'T' && ((name[8] == 'i' && name[9] == 'm') || name[8] == 'e'))
+		Log("PreMarshall", (size_t)vsrc, (size_t)vdst, name, size);
 	void *p = nullptr;
 	bool bContainsPointers = false;
 	bool bFinalize = false;
@@ -480,28 +442,72 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 	}
 	else
 	{
-		p = Allocate(dstAllocator, size);
+		p = dstAllocator->ThreadSafeAllocate(size);
+	}
+
+	*(size_t*)p = 0;
+	p = (void*)((size_t)p + headerSize);
+
+	if (((size_t)p & 0x1f80) == 0x1d80 && size == 0x1c)  //0x1ee00015d80 , 0x000002c6831e5dc8
+	{
+		//Log("Clone trigger ", (size_t)p, size);
 	}
 
 	//Log("Cloned object allocated ", (size_t)p, size);
 	// We know this is not a ByValueClass, but we must do our own reflection, so we start with copying the whole
 	// class, and we will fix the fields that are not value v
-	for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
 	//Log("memwrite", (size_t)p, (size_t)p + size);
 	PTR_MethodTable pMT = src->GetMethodTable();
+	if (show) printf("p%lx\n", p);
 	if (pMT->IsArray())
 	{
-		CloneArray(p, src, pMT, sizeof(ArrayBase), size);
+		if (dstAllocator == nullptr)
+		{
+			Object* clone = (Object*)p;
+			GCPROTECT_BEGIN(clone);
+			GCPROTECT_BEGIN(src);
+			for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
+			CloneArray(p, src, pMT, sizeof(ArrayBase), size);
+			GCPROTECT_END();
+			GCPROTECT_END();
+		}
+		else {
+			Object* clone = (Object*)p;
+			GCPROTECT_BEGIN(clone);
+			GCPROTECT_BEGIN(src);
+			for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
+			CloneArray(p, src, pMT, sizeof(ArrayBase), size);
+			GCPROTECT_END();
+			GCPROTECT_END();
+		}
 	}
 	else
 	{
-		CloneClass(p, src, pMT, sizeof(Object));
+		if (dstAllocator == nullptr)
+		{
+			Object* clone = (Object*)p;
+			GCPROTECT_BEGIN(clone);
+			GCPROTECT_BEGIN(src);
+			for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
+			size_t headerSize = (char*)(src->GetData()) - (char*)src;
+			CloneClass(p, src, pMT, (int)headerSize, size - headerSize);
+			GCPROTECT_END();
+			GCPROTECT_END();
+		}
+		else
+		{
+			Object* clone = (Object*)p;
+			GCPROTECT_BEGIN(clone);
+			GCPROTECT_BEGIN(src);
+			for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
+			size_t headerSize = (char*)(src->GetData()) - (char*)src;
+			CloneClass(p, src, pMT, (int)headerSize, size - headerSize);
+			GCPROTECT_END();
+			GCPROTECT_END();
+		}
 	}
-
-	//Log("ArenaMarshall End");
-
-	if (lockdepth-- <= 0)
-		spinlock2 = 0;
+	if (name[7] == 'T' && ((name[8] == 'i' && name[9] == 'm') || name[8] == 'e'))
+	Log("ArenaMarshall clone", (size_t)src, (size_t)p, name, (size_t)vdst);
 	return p;
 }
 
@@ -513,10 +519,14 @@ void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int i
 	TypeHandle arrayTypeHandle = ArrayBase::GetTypeHandle(pMT);
 	ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
 	TypeHandle ty = ar->GetArrayElementTypeHandle();
-	size_t componentSize = src->GetSize();
+	int componentSize = pMT->RawGetComponentSize();
 	ArrayBase* refArray = (ArrayBase*)src;
 	DWORD numComponents = refArray->GetNumComponents();
 	const CorElementType arrayElType = ty.GetVerifierCorElementType();
+	// copy pMT
+	*((size_t*)dst) = *((size_t*)src);
+	// copy array length
+	*((size_t*)dst + 1) = *((size_t*)src + 1);
 
 	switch (arrayElType) {
 
@@ -543,7 +553,7 @@ void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int i
 					case ELEMENT_TYPE_VALUETYPE:
 						for (size_t i = ioffset; i < ioffset + numComponents*componentSize; i += componentSize)
 						{
-							CloneClass((char*)dst + i, (Object*)((char*)src + i), ty.AsMethodTable(), 0);
+							CloneClass((char*)dst + i, (Object*)((char*)src + i), ty.AsMethodTable(), 0, componentSize);
 						}
 
 						break;
@@ -551,6 +561,15 @@ void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int i
 						break;
 					case ELEMENT_TYPE_CLASS: // objectrefs
 					{
+						// because ArenaMarshall can trigger
+						// a GC, it is necessary to put memory
+						// in a GC safe state first.
+						for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
+						{
+							void** rdst = (void**)((char*)dst + i);
+							*rdst = nullptr;
+						}
+
 						for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
 						{
 							OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + i);
@@ -577,80 +596,227 @@ void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int i
 	}
 }
 
-void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int ioffset)
+void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int ioffset, size_t classSize)
 {
 #if DEBUG
-	//Log((char*)mt->GetDebugClassName(),0,0,"cloneclass");
+	//Log((char*)mt->GetDebugClassName(), 0, 0, "cloneclass");
 #endif
-	DWORD numInstanceFields = mt->GetNumInstanceFields();
-	if (numInstanceFields == 0) return;
-	FieldDesc *pSrcFields = mt->GetApproxFieldDescListRaw();
-	if (pSrcFields == nullptr) return;
-	for (DWORD i = 0; i < numInstanceFields; i++)
+
+	auto pCurrMT = mt;
+	DefineFullyQualifiedNameForClass();
+	char* name = (char*)GetFullyQualifiedNameForClass(mt);
+	if (name[7] == 'T' && ((name[8] == 'i' && name[9] == 'm') || name[8] == 'e'))
+	Log("CloneClass", (size_t)src, classSize, name);
+	while (pCurrMT)
 	{
-		FieldDesc f = pSrcFields[i];
-		if (f.IsStatic()) continue;
-		CorElementType type = f.GetFieldType();
-		DWORD offset = f.GetOffset() + ioffset;
+		DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
+		if (numInstanceFields == 0) break;
+
+		FieldDesc *pSrcFields = pCurrMT->GetApproxFieldDescListRaw();
+		if (pSrcFields == nullptr) break;
+
+		for (DWORD i = 0; i < numInstanceFields; i++)
+		{
+
+			FieldDesc &f = pSrcFields[i];// pSrcFields[i];
+			if (f.IsStatic()) continue;
+			CorElementType type = f.GetFieldType();
+			DWORD offset = f.GetOffset() + ioffset;
+			if (offset >= classSize)
+			{
+				offset = f.GetOffset() + ioffset;
+				continue;  // this seems like a bug, but we workaround for prototypes
+			}
 
 #ifdef DEBUG
-		LPCUTF8 szFieldName = f.GetDebugName();
-		//Log((char*)szFieldName,offset,0,"field");
+			LPCUTF8 szFieldName = f.GetDebugName();
+			//Log((char*)szFieldName, offset, 0, "field");
 #endif
 
 
-		switch (type) {
-		case ELEMENT_TYPE_BOOLEAN:
-		case ELEMENT_TYPE_I1:
-		case ELEMENT_TYPE_U1:
-		case ELEMENT_TYPE_I2:
-		case ELEMENT_TYPE_U2:
-		case ELEMENT_TYPE_CHAR:
-		case ELEMENT_TYPE_I4:
-		case ELEMENT_TYPE_U4:
-		case ELEMENT_TYPE_I8:
-		case ELEMENT_TYPE_U8:
-		case ELEMENT_TYPE_I:
-		case ELEMENT_TYPE_U:
-		case ELEMENT_TYPE_R4:
-		case ELEMENT_TYPE_R8:
-			// basic types are handled with memcpy
-			break;
-		case ELEMENT_TYPE_VALUETYPE:
-		{
+			switch (type) {
 
-			TypeHandle th = LoadExactFieldType(&pSrcFields[i], mt, GetAppDomain());
-			CloneClass((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), 0);
-		}
-		break;
-		case ELEMENT_TYPE_PTR:
-		case ELEMENT_TYPE_FNPTR:
-			// pointers may be dangerous, but they are
-			// copied without chang
-			break;
-		case ELEMENT_TYPE_STRING:
-		case ELEMENT_TYPE_CLASS: // objectrefs
-		case ELEMENT_TYPE_OBJECT:
-		case ELEMENT_TYPE_SZARRAY:      // single dim, zero
-		case ELEMENT_TYPE_ARRAY:        // all other arrays
-		{
-			void *pSrc = *(void **)((char*)src + offset);
-			if (pSrc != nullptr)
+			case ELEMENT_TYPE_VALUETYPE:
 			{
-#if DEBUG
-				//Log((char*)((Object*)pSrc)->GetMethodTable()->GetDebugClassName(), 0, 0, "field type (to clone)");
-#endif
-				void** rdst = (void**)((char*)dst + offset);
-				void* clone = ArenaMarshall((void*)rdst, pSrc);
-				*rdst = clone;
-				//Log("memwriteptr", (size_t)rdst, (size_t)clone);
+
+				TypeHandle th = LoadExactFieldType(&pSrcFields[i], mt, GetAppDomain());
+				CloneClass1((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), 0, th.AsMethodTable()->GetBaseSize());
+			}
+			break;
+			case ELEMENT_TYPE_PTR:
+			case ELEMENT_TYPE_FNPTR:
+				// pointers may be dangerous, but they are
+				// copied without chang
+				break;
+			case ELEMENT_TYPE_STRING:
+			case ELEMENT_TYPE_CLASS: // objectrefs
+			case ELEMENT_TYPE_OBJECT:
+			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+			case ELEMENT_TYPE_ARRAY:        // all other arrays
+			{
+				void *pSrc = *(void **)((char*)src + offset);
+				if (pSrc != nullptr)
+				{
+
+					void** rdst = (void**)((char*)dst + offset);
+					// because ArenaMarshall can trigger a GC
+					// it is necessary to put memory in a GC
+					// safe state first.
+					*rdst = nullptr;
+
+				}
+			}
+			break;
+			default:
+				break;
 			}
 		}
-		break;
-		default:
-			//Log("default", (size_t)type);
+		pCurrMT = pCurrMT->GetParentMethodTable();
+
+	}
+
+	pCurrMT = mt;
+	while (pCurrMT)
+	{
+		DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
+		if (numInstanceFields == 0) break;
+
+		FieldDesc *pSrcFields = pCurrMT->GetApproxFieldDescListRaw();
+		if (pSrcFields == nullptr) break;
+
+		for (DWORD i = 0; i < numInstanceFields; i++)
+		{
+			FieldDesc &f = pSrcFields[i];// pSrcFields[i];
+
+			if (f.IsStatic()) continue;
+			CorElementType type = f.GetFieldType();
+			DWORD offset = f.GetOffset() + ioffset;
+			if (offset >= classSize)
+			{
+				continue;
+			}
+
+#ifdef DEBUG
+			LPCUTF8 szFieldName = f.GetDebugName();
+			//Log((char*)szFieldName, offset, 0, "field");
+#endif
+
+
+			switch (type) {
+
+			case ELEMENT_TYPE_VALUETYPE:
+			{
+				TypeHandle th = LoadExactFieldType(&pSrcFields[i], mt, GetAppDomain());
+				CloneClass((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), 0, th.AsMethodTable()->GetBaseSize());
+			}
 			break;
+			case ELEMENT_TYPE_PTR:
+			case ELEMENT_TYPE_FNPTR:
+				// pointers may be dangerous, but they are
+				// copied without chang
+				break;
+			case ELEMENT_TYPE_STRING:
+			case ELEMENT_TYPE_CLASS: // objectrefs
+			case ELEMENT_TYPE_OBJECT:
+			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+			case ELEMENT_TYPE_ARRAY:        // all other arrays
+			{
+				void *pSrc = *(void **)((char*)src + offset);
+				if (pSrc != nullptr)
+				{
+
+					void** rdst = (void**)((char*)dst + offset);
+					// because ArenaMarshall can trigger a GC
+					// it is necessary to put memory in a GC
+					// safe state first.
+					void* clone = ArenaMarshall((void*)rdst, pSrc);
+					*rdst = clone;
+					//Log("ArenaMarshall ptr", (size_t)rdst, (size_t)clone);
+				}
+			}
+			break;
+			default:
+				break;
+
+			}
 		}
+
+		pCurrMT = pCurrMT->GetParentMethodTable();
+	}
+}
+
+void ArenaManager::CloneClass1(void* dst, Object* src, PTR_MethodTable mt, int ioffset, size_t classSize)
+{
+#if DEBUG
+	Log((char*)mt->GetDebugClassName(), 0, 0, "cloneclass");
+#endif
+
+
+	auto pCurrMT = mt;
+	while (pCurrMT)
+	{
+		DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
+		if (numInstanceFields == 0) break;
+
+		FieldDesc *pSrcFields = pCurrMT->GetApproxFieldDescListRaw();
+		if (pSrcFields == nullptr) break;
+
+		for (DWORD i = 0; i < numInstanceFields; i++)
+		{
+			FieldDesc f = pSrcFields[i];
+			if (f.IsStatic()) continue;
+			CorElementType type = f.GetFieldType();
+			DWORD offset = f.GetOffset() + ioffset;
+			if (offset >= classSize)
+			{
+				continue;
+			}
+
+#ifdef DEBUG
+			LPCUTF8 szFieldName = f.GetDebugName();
+			//Log((char*)szFieldName, offset, 0, "field");
+#endif
+
+
+			switch (type) {
+
+			case ELEMENT_TYPE_VALUETYPE:
+			{
+
+				TypeHandle th = LoadExactFieldType(&pSrcFields[i], mt, GetAppDomain());
+				CloneClass1((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), 0, th.AsMethodTable()->GetBaseSize());
+			}
+			break;
+			case ELEMENT_TYPE_PTR:
+			case ELEMENT_TYPE_FNPTR:
+				// pointers may be dangerous, but they are
+				// copied without chang
+				break;
+			case ELEMENT_TYPE_STRING:
+			case ELEMENT_TYPE_CLASS: // objectrefs
+			case ELEMENT_TYPE_OBJECT:
+			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+			case ELEMENT_TYPE_ARRAY:        // all other arrays
+			{
+				void *pSrc = *(void **)((char*)src + offset);
+				if (pSrc != nullptr)
+				{
+
+					void** rdst = (void**)((char*)dst + offset);
+					// because ArenaMarshall can trigger a GC
+					// it is necessary to put memory in a GC
+					// safe state first.
+					*rdst = nullptr;
+					//Log("memwriteptr", (size_t)rdst, (size_t)clone);
+				}
+			}
+			break;
+			default:
+				break;
+			}
+		}
+
+		pCurrMT = pCurrMT->GetParentMethodTable();
 	}
 }
 
@@ -689,5 +855,9 @@ TypeHandle LoadExactFieldType(FieldDesc *pFD, MethodTable *pEnclosingMT, AppDoma
 
 void* RunAllocator(void* allocator, size_t len)
 {
-	return ((Arena*)allocator)->Allocate(len);
+	if (allocator == nullptr)
+	{
+		return nullptr;
+	}
+	return ((ArenaThread*)allocator)->Allocate(len);
 }

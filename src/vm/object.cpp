@@ -1456,18 +1456,20 @@ void SetObjectReferenceChecked(OBJECTREF *dst,OBJECTREF ref,AppDomain *pAppDomai
 
 void SetObjectReferenceUnchecked(OBJECTREF *dst,OBJECTREF ref)
 {
-	if (ISARENA(dst)? !ISSAMEARENA(dst, ref) : ISARENA(ref))
+	STATIC_CONTRACT_NOTHROW;
+	STATIC_CONTRACT_GC_NOTRIGGER;
+	STATIC_CONTRACT_FORBID_FAULT;
+	STATIC_CONTRACT_MODE_COOPERATIVE;
+	STATIC_CONTRACT_CANNOT_TAKE_LOCK;
+
+	Object* oref = OBJECTREFToObject(ref);
+	if (ISARENA(dst)? !ISSAMEARENA(dst, oref) : ISARENA(oref))
 	{
-		auto ref2 = ::ArenaManager::ArenaMarshall(dst, ref);
-		VolatileStore((Object**)dst, OBJECTREFToObject(ref2));
+		Object* ref2 = (Object*)::ArenaManager::ArenaMarshall(dst, oref);
+		
+		VolatileStore<Object*>((Object**)dst, ref2);
 		return;
 	} 
-
-    STATIC_CONTRACT_NOTHROW;
-    STATIC_CONTRACT_GC_NOTRIGGER;
-    STATIC_CONTRACT_FORBID_FAULT;
-    STATIC_CONTRACT_MODE_COOPERATIVE;
-    STATIC_CONTRACT_CANNOT_TAKE_LOCK;
 
     // Assign value. We use casting to avoid going thru the overloaded
     // OBJECTREF= operator which in this case would trigger a false

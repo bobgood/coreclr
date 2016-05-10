@@ -5,13 +5,10 @@
 #include "arenastack.h"
 #include "..\..\vm\threads.h"
 
-namespace sfl
-{
-	class ArenaAllocator;
-}
-typedef sfl::ArenaAllocator Arena;
-class ObjectHashTable;
-class Object;
+
+
+class Arena;
+class ArenaThread;
 
 class ArenaManager
 {
@@ -30,8 +27,8 @@ public:
 	static const int arenaAddressShift = 32;  // at most 4GB per arena total
 	static const int addressBits = 43;
 
-											  // The base address of arenas (to distinguish arenas from other memory)
-	static const size_t arenaBaseRequest = 1ULL << (addressBits-1); // half of virtual address space reserved for arenas
+	// The base address of arenas (to distinguish arenas from other memory)
+	static const size_t arenaBaseRequest = 1ULL << (addressBits - 1); // half of virtual address space reserved for arenas
 	static const size_t arenaRangeEnd = arenaBaseRequest + ((size_t)maxArenas << arenaAddressShift);
 
 	// Minimum and maximum size of buffers allocated to arenas (each new buffer is twice the size of the prior)
@@ -51,9 +48,12 @@ private:
 	// Reservation system for all arenas.
 	static unsigned long refCount[maxArenas];
 	static void* arenaById[maxArenas];
+	static HANDLE hFile;
 
 public:
 	static volatile __int64 totalMemory;
+
+	static int lcnt;
 
 private:
 	static Arena* MakeArena();
@@ -68,19 +68,8 @@ private:
 	// Converts an arena ID into a base address in virtual address space.
 	static size_t IdToAddress(int id);
 
-	static ObjectHashTable& FindCloneTable(void* src, void* target);
-
-	// FindClone and SetClone do not work if an object is relocated in GC.  Not sure if we can subscribe to GC to find pointers that have moved or expired.
-	static Object* FindClone(void* src, void* target);
-
-	// thread safe - returns false if the value was already set
-	static bool SetClone(void* src, void* target);
-
 
 private:
-	static void CloneArray(void* dst, Object* src, PTR_MethodTable mt, int offset,size_t size);
-	static void CloneClass(void* dst, Object* src, PTR_MethodTable mt, int offset);
-
 	// Deletes an Arena and releases all its memory.
 	static void DeleteAllocator(void*);
 
@@ -89,7 +78,7 @@ private:
 
 	// decrements the reference count, and releases the arena if zero
 	static void DereferenceId(int id);
-	
+
 	// adds to the reference count
 	static void ReferenceId(int id);
 
@@ -102,6 +91,12 @@ private:
 	inline static unsigned int Id(void * allocator);
 
 	inline static void* AllocatorFromAddress(void * addr);
+
+	static void CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int ioffset, size_t size);
+
+	static void CloneClass(void* dst, Object* src, PTR_MethodTable mt, int ioffset, size_t classSize);
+
+	static void CloneClass1(void* dst, Object* src, PTR_MethodTable mt, int ioffset, size_t classSize);
 
 public:
 	// Initializes all Arena structures (call this once per process, before all other calls).
@@ -116,11 +111,13 @@ public:
 	// a pointer to an allocated buffer
 	static void* Allocate(size_t jsize);
 
+	static void* Peek();
+
 	// Returns a pointer to allocated memory from a specific arena
-	static void* Allocate(Arena* arena, size_t jsize);
+	static void* Allocate(ArenaThread* arena, size_t jsize);
 
 	// Log method that writes to STD_OUTPUT
-	static void Log(char* str, size_t n = 0, size_t n2 = 0,char*hdr=nullptr);
+	static void Log(char* str, size_t n = 0, size_t n2 = 0, char*hdr = nullptr, size_t n3=0);
 
 	// system code (i.e. JIT) that runs in the user thread should not use arenas.
 	static void PushGC();
@@ -131,7 +128,7 @@ public:
 	static bool IsArenaAddress(void*p) {
 		size_t a = (size_t)p;
 		//return (0 != _bittest64((LONG64*)&a, addressBits - 1));
-		 return (a >= arenaBaseRequest);
+		return (a >= arenaBaseRequest);
 	}
 
 	static bool IsSameArenaAddress(void*p, void*q) {

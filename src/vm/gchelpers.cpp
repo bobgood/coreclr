@@ -103,6 +103,10 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	{
 
 		//::ArenaManager::Log("AllocateObject arena", (size_t)retVal,size);
+		if (((size_t)retVal & 7) != 0)
+		{
+			//::ArenaManager::Log("address error", (size_t)retVal, size);
+		}
 		return retVal;
 	}
 
@@ -114,7 +118,18 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	else
 		retVal = GCHeap::GetGCHeap()->Alloc(size, flags);
 	END_INTERIOR_STACK_PROBE;
+	if (retVal != nullptr)
+	{
+
+		//::ArenaManager::Log("AllocateObject arena", (size_t)retVal, size);
+		if (((size_t)retVal & 7) != 0)
+		{
+			::ArenaManager::Log("address error", (size_t)retVal, size);
+		}
+		return retVal;
+	}
 	//::ArenaManager::Log("AllocateObject GC", (size_t)retVal, size);
+
 	return retVal;
 }
 
@@ -625,52 +640,52 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 
 	ArrayBase* orObject;
 
-	
-		if (bAllocateInLargeHeap)
-		{
-			orObject = (ArrayBase*)AllocLHeap(totalSize, FALSE, FALSE);
-		}
-		else
-		{
-			ArrayTypeDesc *pArrayR8TypeDesc = g_pPredefinedArrayTypes[ELEMENT_TYPE_R8];
-			if (DATA_ALIGNMENT < sizeof(double) && pArrayR8TypeDesc != NULL && pMT == pArrayR8TypeDesc->GetMethodTable() && totalSize < LARGE_OBJECT_SIZE - MIN_OBJECT_SIZE)
-			{
-				// Creation of an array of doubles, not in the large object heap.
-				// We want to align the doubles to 8 byte boundaries, but the GC gives us pointers aligned
-				// to 4 bytes only (on 32 bit platforms). To align, we ask for 12 bytes more to fill with a
-				// dummy object.
-				// If the GC gives us a 8 byte aligned address, we use it for the array and place the dummy
-				// object after the array, otherwise we put the dummy object first, shifting the base of
-				// the array to an 8 byte aligned address.
-				// Note: on 64 bit platforms, the GC always returns 8 byte aligned addresses, and we don't
-				// execute this code because DATA_ALIGNMENT < sizeof(double) is false.
 
-				_ASSERTE(DATA_ALIGNMENT == sizeof(double) / 2);
-				_ASSERTE((MIN_OBJECT_SIZE % sizeof(double)) == DATA_ALIGNMENT);   // used to change alignment
-				_ASSERTE(pMT->GetComponentSize() == sizeof(double));
-				_ASSERTE(g_pObjectClass->GetBaseSize() == MIN_OBJECT_SIZE);
-				_ASSERTE(totalSize < totalSize + MIN_OBJECT_SIZE);
-				orObject = (ArrayBase*)Alloc(totalSize + MIN_OBJECT_SIZE, FALSE, FALSE);
-	
-				Object *orDummyObject;
-				if ((size_t)orObject % sizeof(double))
-				{
-					orDummyObject = orObject;
-					orObject = (ArrayBase*)((size_t)orObject + MIN_OBJECT_SIZE);
-				}
-				else
-				{
-					orDummyObject = (Object*)((size_t)orObject + totalSize);
-				}
-				_ASSERTE(((size_t)orObject % sizeof(double)) == 0);
-				orDummyObject->SetMethodTable(g_pObjectClass);
+	if (bAllocateInLargeHeap)
+	{
+		orObject = (ArrayBase*)AllocLHeap(totalSize, FALSE, FALSE);
+	}
+	else
+	{
+		ArrayTypeDesc *pArrayR8TypeDesc = g_pPredefinedArrayTypes[ELEMENT_TYPE_R8];
+		if (DATA_ALIGNMENT < sizeof(double) && pArrayR8TypeDesc != NULL && pMT == pArrayR8TypeDesc->GetMethodTable() && totalSize < LARGE_OBJECT_SIZE - MIN_OBJECT_SIZE)
+		{
+			// Creation of an array of doubles, not in the large object heap.
+			// We want to align the doubles to 8 byte boundaries, but the GC gives us pointers aligned
+			// to 4 bytes only (on 32 bit platforms). To align, we ask for 12 bytes more to fill with a
+			// dummy object.
+			// If the GC gives us a 8 byte aligned address, we use it for the array and place the dummy
+			// object after the array, otherwise we put the dummy object first, shifting the base of
+			// the array to an 8 byte aligned address.
+			// Note: on 64 bit platforms, the GC always returns 8 byte aligned addresses, and we don't
+			// execute this code because DATA_ALIGNMENT < sizeof(double) is false.
+
+			_ASSERTE(DATA_ALIGNMENT == sizeof(double) / 2);
+			_ASSERTE((MIN_OBJECT_SIZE % sizeof(double)) == DATA_ALIGNMENT);   // used to change alignment
+			_ASSERTE(pMT->GetComponentSize() == sizeof(double));
+			_ASSERTE(g_pObjectClass->GetBaseSize() == MIN_OBJECT_SIZE);
+			_ASSERTE(totalSize < totalSize + MIN_OBJECT_SIZE);
+			orObject = (ArrayBase*)Alloc(totalSize + MIN_OBJECT_SIZE, FALSE, FALSE);
+
+			Object *orDummyObject;
+			if ((size_t)orObject % sizeof(double))
+			{
+				orDummyObject = orObject;
+				orObject = (ArrayBase*)((size_t)orObject + MIN_OBJECT_SIZE);
 			}
 			else
 			{
-				orObject = (ArrayBase*)Alloc(totalSize, FALSE, FALSE);
-				bPublish = (totalSize >= LARGE_OBJECT_SIZE && !ISARENA(orObject));
+				orDummyObject = (Object*)((size_t)orObject + totalSize);
 			}
+			_ASSERTE(((size_t)orObject % sizeof(double)) == 0);
+			orDummyObject->SetMethodTable(g_pObjectClass);
 		}
+		else
+		{
+			orObject = (ArrayBase*)Alloc(totalSize, FALSE, FALSE);
+			bPublish = (totalSize >= LARGE_OBJECT_SIZE && !ISARENA(orObject));
+		}
+	}
 
 	// Initialize Object
 	orObject->SetMethodTable(pMT);
@@ -877,7 +892,6 @@ STRINGREF SlowAllocateString(DWORD cchStringLength)
 	SetTypeHandleOnThreadForAlloc(TypeHandle(g_pStringClass));
 
 	orObject = (StringObject *)Alloc(ObjectSize, FALSE, FALSE);
-
 	// Object is zero-init already
 	_ASSERTE(orObject->HasEmptySyncBlockInfo());
 
@@ -1023,6 +1037,8 @@ OBJECTREF AllocateObject(MethodTable *pMT
 		}
 
 		// verify zero'd memory (at least for sync block)
+
+			// Object is zero-init already
 		_ASSERTE(orObject->HasEmptySyncBlockInfo());
 
 		if ((baseSize >= LARGE_OBJECT_SIZE && !ISARENA(orObject)))
@@ -1065,10 +1081,10 @@ OBJECTREF AllocateObject(MethodTable *pMT
 		LogAlloc(pMT->GetBaseSize(), pMT, orObject);
 
 		oref = OBJECTREF_TO_UNCHECKED_OBJECTREF(orObject);
-		}
+	}
 
 	return UNCHECKED_OBJECTREF_TO_OBJECTREF(oref);
-	}
+}
 
 //========================================================================
 //

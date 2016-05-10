@@ -3566,6 +3566,7 @@ void MethodTable::DoRunClassInitThrowing()
                         gc.pInnerException = NULL;
                         gc.pInitException = NULL;
                         gc.pThrowable = NULL;
+						START_NOT_ARENA_SECTION
                         GCPROTECT_BEGIN(gc);
     
                         if (!RunClassInitEx(&gc.pInnerException))
@@ -3624,8 +3625,10 @@ void MethodTable::DoRunClassInitThrowing()
                             // We should be having a valid corruption severity at this point
                             _ASSERTE(pEntry->m_CorruptionSeverity != NotSet);
     #endif // FEATURE_CORRUPTING_EXCEPTIONS
-    
-                            COMPlusThrow(gc.pThrowable
+							DefineFullyQualifiedNameForClass();
+							char* name = (char*)GetFullyQualifiedNameForClass(this);
+							::ArenaManager::Log("Throwing", (size_t)this,0,name);
+							COMPlusThrow(gc.pThrowable
     #ifdef FEATURE_CORRUPTING_EXCEPTIONS
                                 , pEntry->m_CorruptionSeverity
     #endif // FEATURE_CORRUPTING_EXCEPTIONS
@@ -3633,6 +3636,7 @@ void MethodTable::DoRunClassInitThrowing()
                         }
     
                         GCPROTECT_END();
+						END_NOT_ARENA_SECTION
                     }
                 }
 
@@ -3724,8 +3728,23 @@ void MethodTable::CheckRunClassInitThrowing()
     if (!pLocalModule->IsClassAllocated(this, iClassIndex))
         pLocalModule->PopulateClass(this);
 
-    if (!pLocalModule->IsClassInitialized(this, iClassIndex))
-        DoRunClassInitThrowing();
+	if (!pLocalModule->IsClassInitialized(this, iClassIndex))
+	{
+		auto t = pLocalModule->IsClassInitialized(this, iClassIndex);
+		if (!t)
+		{
+		
+			t = pLocalModule->IsClassInitialized(this, iClassIndex);
+			if (!t)
+			{
+				DefineFullyQualifiedNameForClass();
+				char* name = (char*)GetFullyQualifiedNameForClass(this);
+
+				::ArenaManager::Log("Class not initialized: ", (size_t)this, 0, name);
+				DoRunClassInitThrowing();
+			}
+		}
+	}
 }
 
 //==========================================================================================

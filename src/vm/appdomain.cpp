@@ -12252,6 +12252,7 @@ void    DomainLocalModule::AllocateDynamicClass(MethodTable *pMT)
         {
             GCX_COOP();
             OBJECTREF nongcStaticsArray = NULL;
+			START_NOT_ARENA_SECTION
             GCPROTECT_BEGIN(nongcStaticsArray);
 #ifdef FEATURE_64BIT_ALIGNMENT
             // Allocate memory with extra alignment only if it is really necessary
@@ -12262,6 +12263,7 @@ void    DomainLocalModule::AllocateDynamicClass(MethodTable *pMT)
                 nongcStaticsArray = AllocatePrimitiveArray(ELEMENT_TYPE_U1, dwStaticBytes);
             ((CollectibleDynamicEntry *)pDynamicStatics)->m_hNonGCStatics = GetDomainFile()->GetModule()->GetLoaderAllocator()->AllocateHandle(nongcStaticsArray);
             GCPROTECT_END();
+			END_NOT_ARENA_SECTION
         }
         if (dwNumHandleStatics > 0)
         {
@@ -12272,12 +12274,14 @@ void    DomainLocalModule::AllocateDynamicClass(MethodTable *pMT)
             }
             else
             {
+				START_NOT_ARENA_SECTION
                 GCX_COOP();
                 OBJECTREF gcStaticsArray = NULL;
                 GCPROTECT_BEGIN(gcStaticsArray);
                 gcStaticsArray = AllocateObjectArray(dwNumHandleStatics, g_pObjectClass);
                 ((CollectibleDynamicEntry *)pDynamicStatics)->m_hGCStatics = GetDomainFile()->GetModule()->GetLoaderAllocator()->AllocateHandle(gcStaticsArray);
                 GCPROTECT_END();
+				END_NOT_ARENA_SECTION
             }
         }
     }
@@ -12305,9 +12309,11 @@ void DomainLocalModule::PopulateClass(MethodTable *pMT)
 
         if (!IsClassAllocated(pMT, iClassIndex))
         {
+			START_NOT_ARENA_SECTION
             // Allocate dynamic space if necessary
             if (pMT->IsDynamicStatics())
                 AllocateDynamicClass(pMT);
+			END_NOT_ARENA_SECTION
 
             // determine flags to set on the statics block
             DWORD dwFlags = ClassInitFlags::ALLOCATECLASS_FLAG;
