@@ -47,8 +47,8 @@ extern JITutil_ChkCastInterface:proc
 extern JITutil_IsInstanceOfInterface:proc
 extern JITutil_ChkCastAny:proc
 extern JITutil_IsInstanceOfAny:proc
-ArenaMarshall equ ?ArenaMarshall@ArenaManager@@SAPEAXPEAX0@Z
-extern ArenaMarshall:proc
+ArenaMarshal equ ?ArenaMarshal@ArenaManager@@SAPEAXPEAX0@Z
+extern ArenaMarshal:proc
 
 ;EXTERN_C Object* JIT_IsInstanceOfClass(MethodTable* pMT, Object* pObject);
 LEAF_ENTRY JIT_IsInstanceOfClass, _TEXT
@@ -541,7 +541,7 @@ MixedArenaGC0:
         END_PROLOGUE
 		
     
-        mov                 rax, ArenaMarshall
+        mov                 rax, ArenaMarshal
 		call                rax
 
         add                 rsp, 20h
@@ -1010,7 +1010,7 @@ endif ; _DEBUG
         ; unlink the TailCallFrame
         ;
         mov     [r14 + OFFSETOF__Thread__m_pFrame], r15
-
+		 
         ; 
         ; epilog
         ;

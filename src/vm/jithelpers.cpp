@@ -3092,7 +3092,7 @@ HCIMPL1_RAW(StringObject*, UnframedAllocateString, DWORD stringLength)
     
     return((StringObject*) OBJECTREFToObject(result));
 }
-HCIMPLEND_RAW
+HCIMPLEND_RAW 
 
 HCIMPL1(StringObject*, FramedAllocateString, DWORD stringLength)
 {

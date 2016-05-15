@@ -1465,7 +1465,7 @@ void SetObjectReferenceUnchecked(OBJECTREF *dst,OBJECTREF ref)
 	Object* oref = OBJECTREFToObject(ref);
 	if (ISARENA(dst)? !ISSAMEARENA(dst, oref) : ISARENA(oref))
 	{
-		Object* ref2 = (Object*)::ArenaManager::ArenaMarshall(dst, oref);
+		Object* ref2 = (Object*)::ArenaManager::ArenaMarshal(dst, oref);
 		
 		VolatileStore<Object*>((Object**)dst, ref2);
 		return;
@@ -1982,7 +1982,7 @@ STRINGREF StringObject::NewString(const WCHAR *pwsz, int length) {
         // pointer from the gc heap here as long as it is pinned.  This
         // can happen when a string is marshalled to unmanaged by 
         // pinning and then later put into a struct and that struct is
-        // then marshalled to managed.  
+        // then marshalled to managed.   
         //
         _ASSERTE(!GCHeap::GetGCHeap()->IsHeapPointer((BYTE *) pwsz) ||
                  !"pwsz can not point to GC Heap");

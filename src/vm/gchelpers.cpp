@@ -1,4 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
@@ -99,14 +100,8 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 
 	Object *retVal = NULL;
 	retVal = (Object *)::ArenaManager::Allocate(size);
-	if (retVal != nullptr)
+	if (retVal != nullptr) 
 	{
-
-		//::ArenaManager::Log("AllocateObject arena", (size_t)retVal,size);
-		if (((size_t)retVal & 7) != 0)
-		{
-			//::ArenaManager::Log("address error", (size_t)retVal, size);
-		}
 		return retVal;
 	}
 
@@ -118,17 +113,6 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	else
 		retVal = GCHeap::GetGCHeap()->Alloc(size, flags);
 	END_INTERIOR_STACK_PROBE;
-	if (retVal != nullptr)
-	{
-
-		//::ArenaManager::Log("AllocateObject arena", (size_t)retVal, size);
-		if (((size_t)retVal & 7) != 0)
-		{
-			::ArenaManager::Log("address error", (size_t)retVal, size);
-		}
-		return retVal;
-	}
-	//::ArenaManager::Log("AllocateObject GC", (size_t)retVal, size);
 
 	return retVal;
 }
@@ -153,7 +137,7 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
 	if (retVal != nullptr)
 	{
 
-		//::ArenaManager::Log("AllocateObject arena2", retVal, size);
+		::ArenaManager::Log("AllocateObject arena2", retVal, size);
 		return retVal;
 	}
 
@@ -166,7 +150,7 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
 		retVal = GCHeap::GetGCHeap()->AllocAlign8(size, flags);
 
 	END_INTERIOR_STACK_PROBE;
-	//::ArenaManager::Log("AllocateObject GC2", retVal, size);
+	::ArenaManager::Log("AllocateObject GC2", retVal, size);
 	return retVal;
 }
 #endif // FEATURE_64BIT_ALIGNMENT
@@ -204,7 +188,7 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	if (retVal != nullptr)
 	{
 
-		//::ArenaManager::Log("AllocateObject arena3", (size_t)retVal, size);
+		::ArenaManager::Log("AllocateObject arena3", (size_t)retVal, size);
 		return retVal;
 	}
 
@@ -214,8 +198,8 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	INTERIOR_STACK_PROBE_FOR(GetThread(), static_cast<unsigned>(DEFAULT_ENTRY_PROBE_AMOUNT * 1.5));
 	retVal = GCHeap::GetGCHeap()->AllocLHeap(size, flags);
 	END_INTERIOR_STACK_PROBE;
-	//::ArenaManager::Log("AllocateObject GC3", (size_t)retVal, size);
-
+	::ArenaManager::Log("AllocateObject GC3", (size_t)retVal, size);
+	 
 	return retVal;
 }
 
@@ -419,12 +403,15 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	if (maxArrayDimensionLengthOverflow)
 		ThrowOutOfMemoryDimensionsExceeded();
 
+	
 	// Allocate the space from the GC heap
 	S_SIZE_T safeTotalSize = S_SIZE_T(cElements) * S_SIZE_T(componentSize) + S_SIZE_T(pArrayMT->GetBaseSize());
 	if (safeTotalSize.IsOverflow())
 		ThrowOutOfMemoryDimensionsExceeded();
 
 	size_t totalSize = safeTotalSize.Value();
+
+	
 
 #ifdef FEATURE_DOUBLE_ALIGNMENT_HINT
 	if ((elemType == ELEMENT_TYPE_R8) &&
@@ -639,7 +626,6 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 	BOOL bPublish = bAllocateInLargeHeap;
 
 	ArrayBase* orObject;
-
 
 	if (bAllocateInLargeHeap)
 	{

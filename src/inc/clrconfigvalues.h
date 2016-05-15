@@ -345,7 +345,7 @@ CONFIG_DWORD_INFO_EX(INTERNAL_GcStressOnDirectCalls, W("GcStressOnDirectCalls"),
 RETAIL_CONFIG_DWORD_INFO(EXTERNAL_GCStressStart, W("GCStressStart"), 0, "start GCStress after N stress GCs have been attempted")
 RETAIL_CONFIG_DWORD_INFO(INTERNAL_GCStressStartAtJit, W("GCStressStartAtJit"), 0, "start GCStress after N items are jitted")
 RETAIL_CONFIG_DWORD_INFO_DIRECT_ACCESS(UNSUPPORTED_GCtraceEnd, W("GCtraceEnd"), "Specifies the index of the GC when the logging should end")
-CONFIG_DWORD_INFO_DIRECT_ACCESS(INTERNAL_GCtraceFacility, W("GCtraceFacility"), "Specifies where to log to (this allows you to log to console, the stress log or a normal CLR log (good when you need to correlate the GC activities with other CLR activities)")
+RETAIL_CONFIG_DWORD_INFO_DIRECT_ACCESS(INTERNAL_GCtraceFacility, W("GCtraceFacility"), "Specifies where to log to (this allows you to log to console, the stress log or a normal CLR log (good when you need to correlate the GC activities with other CLR activities)")
 RETAIL_CONFIG_DWORD_INFO_DIRECT_ACCESS(UNSUPPORTED_GCtraceStart, W("GCtraceStart"), "Specifies the index of the GC when the logging should start")
 RETAIL_CONFIG_DWORD_INFO_DIRECT_ACCESS(EXTERNAL_gcTrimCommitOnLowMemory, W("gcTrimCommitOnLowMemory"), "When set we trim the committed space more aggressively for the ephemeral seg. This is used for running many instances of server processes where they want to keep as little memory committed as possible")
 RETAIL_CONFIG_DWORD_INFO(UNSUPPORTED_BGCSpinCount, W("BGCSpinCount"), 140, "Specifies the bgc spin count")

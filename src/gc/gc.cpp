@@ -19,6 +19,14 @@
 
 #include "gcpriv.h"
 
+__declspec(noinline)
+void Stop()
+{
+	printf("assert\n");
+}
+#undef assert
+#define assert(x) if (!(x)) {Stop();}
+
 #define USE_INTROSORT
 
 #if defined(GC_PROFILING) || defined(FEATURE_EVENT_TRACE)
@@ -5686,9 +5694,7 @@ void gc_heap::fix_large_allocation_area (BOOL for_gc_p)
 {
     UNREFERENCED_PARAMETER(for_gc_p);
 
-#ifdef _DEBUG
     alloc_context* acontext = 
-#endif // _DEBUG
         generation_alloc_context (large_object_generation);
     assert (acontext->alloc_ptr == 0);
     assert (acontext->alloc_limit == 0); 

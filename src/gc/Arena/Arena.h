@@ -197,7 +197,7 @@ public:
 		SpinLock(m_lock1);
 		auto ret = m_sharedArenaThread.Allocate(size, false);
 		SpinUnlock(m_lock1);
-		//::ArenaManager::Log("clone Allocate", (size_t)ret, size);
+		::ArenaManager::Log("clone Allocate", (size_t)ret, size);
 		return ret;
 	}
 };

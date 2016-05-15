@@ -123,7 +123,7 @@ public:
 	static void PushGC();
 	static void Pop();
 
-	static void* ArenaMarshall(void*, void*);
+	static void* ArenaMarshal(void*, void*);
 
 	static bool IsArenaAddress(void*p) {
 		size_t a = (size_t)p;
@@ -138,7 +138,11 @@ public:
 
 	// Deep clones the src object, and returns a pointer.  The clone is done into the allocator
 	// that holds the object target.
-	static void* Marshall(void*src, void*target);
+	static void* Marshal(void*src, void*target);
+
+	static void VerifyObject(Object* o, MethodTable* pMT=nullptr);
+	static void VerifyClass(Object* o, MethodTable* pMT = nullptr);
+	static void VerifyArray(Object* o, MethodTable* pMT = nullptr);
 
 	static ArenaStack& GetArenaStack()
 	{
@@ -154,4 +158,4 @@ public:
 #define START_NOT_ARENA_SECTION ::ArenaManager::PushGC();
 #define END_NOT_ARENA_SECTION ::ArenaManager::Pop();
 
-//extern void* _stdcall ArenaMarshall(void*, void*);
+//extern void* _stdcall ArenaMarshal(void*, void*);

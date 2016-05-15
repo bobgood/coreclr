@@ -15,13 +15,13 @@
 ;        This code should never be executed at runtime and should end
 ;        up effectively being treated as data.
 ; ***********************************************************************
-
+ 
 include AsmMacros.inc
 include asmconstants.inc
 
 extern JIT_InternalThrow:proc
-ArenaMarshall equ ?ArenaMarshall@ArenaManager@@SAPEAXPEAX0@Z
-extern ArenaMarshall:proc
+ArenaMarshal equ ?ArenaMarshal@ArenaManager@@SAPEAXPEAX0@Z
+extern ArenaMarshal:proc
 MIN_SIZE equ 28h
 
 
@@ -100,7 +100,7 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
 
         END_PROLOGUE
     
-        mov                 rax, ArenaMarshall
+        mov                 rax, ArenaMarshal
 		call                rax
 
         add                 rsp, 20h
@@ -175,7 +175,7 @@ MixedArenaGC2:
 
         END_PROLOGUE
     
-        mov                 rax, ArenaMarshall
+        mov                 rax, ArenaMarshal
 		call                rax
 
         add                 rsp, 20h
@@ -263,7 +263,7 @@ MixedArenaGC3:
 
         END_PROLOGUE
     
-		mov                 rax,ArenaMarshall
+		mov                 rax,ArenaMarshal
         call                (rax)
 
         add                 rsp, 20h
@@ -340,7 +340,7 @@ MixedArenaGC4:
 
         END_PROLOGUE
     
-        mov                 rax, ArenaMarshall
+        mov                 rax, ArenaMarshal
 		call                rax
 
         add                 rsp, 20h
@@ -415,7 +415,7 @@ MixedArenaGC5:
 
         END_PROLOGUE
     
-        mov                 rax, ArenaMarshall
+        mov                 rax, ArenaMarshal
 		call                rax
 
         add                 rsp, 20h
@@ -484,7 +484,7 @@ MixedArenaGC6:
 
         END_PROLOGUE
     
-        mov                 rax, ArenaMarshall
+        mov                 rax, ArenaMarshal
 		call                rax
 
         add                 r10, 20h

@@ -2,14 +2,19 @@
 #include "../common.h"
 #include "arenaManager.h"
 #include "Arena.h"
-#include "ArenaHeader.h"
-#include "vector.h"
+
 #include "../object.h"
 #include <windows.h>
 #include <tchar.h>
 #include <stdio.h>
 #include <strsafe.h>
 #include "class.h"
+
+#define LOGGING
+namespace WKS
+{
+	extern int hcnt;
+}
 
 size_t ArenaManager::virtualBase;
 TypeHandle LoadExactFieldType(FieldDesc *pFD, MethodTable *pEnclosingMT, AppDomain *pDomain);
@@ -28,8 +33,6 @@ HANDLE ArenaManager::hFile = 0;
 
 void ArenaManager::InitArena()
 {
-
-
 	for (int i = 0; i < maxArenas; i++)
 	{
 		arenaById[i] = nullptr;
@@ -286,11 +289,9 @@ void* ArenaManager::Allocate(ArenaThread* arena, size_t jsize)
 }
 
 int ArenaManager::lcnt = 0;
-volatile DWORD spinlock;
-int lockdep = 0;
 void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr, size_t n3)
 {
-	return;
+#ifdef LOGGING
 	if (hFile == (HANDLE)0xffffffff || hFile == 0)
 	{
 		hFile = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -316,7 +317,10 @@ void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr, size_t n3)
 	DWORD written;
 
 	_itoa(lcnt++, pbuf, 10);
-	pbufI = strlen(pbuf);
+	pbufI = strlen(pbuf); 
+	//pbuf[pbufI++] = ',';
+	//_itoa(WKS::hcnt, pbuf + pbufI, 10);
+	//pbufI = strlen(pbuf);
 	pbuf[pbufI++] = '[';
 
 	_itoa(tid, pbuf + pbufI, 10);
@@ -387,11 +391,8 @@ void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr, size_t n3)
 	pbuf[pbufI++] = '\n';
 
 	WriteFile(hFile, pbuf, (DWORD)pbufI, &written, 0);
-	if (lcnt == 163)
-	{
-		printf("\ntrigger\n\n");
-	}
 	//FlushFileBuffers(hFile);
+#endif
 }
 
 #define header(i) ((CObjectHeader*)(i))
@@ -399,13 +400,13 @@ bool show = false;
 
 alloc_context* GetThreadAllocContext();
 
-volatile DWORD spinlock2 = 0;
-int lockdepth = 0;
 #define ROUNDSIZE(x) (((size_t)(x)+7)&~7)
-void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
+void*  ArenaManager::ArenaMarshal(void*vdst, void*vsrc)
 {
 	if (vsrc == nullptr) return nullptr;
-
+#ifdef LOGGING
+	VerifyObject((Object*)vsrc);
+#endif
 	// src Allocator is not used
 	Arena* srcAllocator = (Arena*)AllocatorFromAddress(vsrc);
 	Arena* dstAllocator = (Arena*)AllocatorFromAddress(vdst);
@@ -417,15 +418,23 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 	MethodTable* mT;
 	size_t cnt = 0;
 	mT = src->GetMethodTable();
+#ifdef LOGGING
+	START_NOT_ARENA_SECTION
 	DefineFullyQualifiedNameForClass();
 	char* name = (char*)GetFullyQualifiedNameForClass(mT);
+	END_NOT_ARENA_SECTION
+#else
+	char* name = "?";
+#endif
+
 	cnt = (mT->GetBaseSize() +
 		(mT->HasComponentSize() ?
 			((size_t)(src->GetNumComponents() * mT->RawGetComponentSize())) : 0));
 
 	size_t size = ROUNDSIZE(cnt) + sizeof(Object) + headerSize;
-	if (name[7] == 'T' && ((name[8] == 'i' && name[9] == 'm') || name[8] == 'e'))
+#ifdef LOGGING
 		Log("PreMarshall", (size_t)vsrc, (size_t)vdst, name, size);
+#endif
 	void *p = nullptr;
 	bool bContainsPointers = false;
 	bool bFinalize = false;
@@ -448,17 +457,11 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 	*(size_t*)p = 0;
 	p = (void*)((size_t)p + headerSize);
 
-	if (((size_t)p & 0x1f80) == 0x1d80 && size == 0x1c)  //0x1ee00015d80 , 0x000002c6831e5dc8
-	{
-		//Log("Clone trigger ", (size_t)p, size);
-	}
-
 	//Log("Cloned object allocated ", (size_t)p, size);
 	// We know this is not a ByValueClass, but we must do our own reflection, so we start with copying the whole
 	// class, and we will fix the fields that are not value v
 	//Log("memwrite", (size_t)p, (size_t)p + size);
 	PTR_MethodTable pMT = src->GetMethodTable();
-	if (show) printf("p%lx\n", p);
 	if (pMT->IsArray())
 	{
 		if (dstAllocator == nullptr)
@@ -506,16 +509,17 @@ void*  ArenaManager::ArenaMarshall(void*vdst, void*vsrc)
 			GCPROTECT_END();
 		}
 	}
-	if (name[7] == 'T' && ((name[8] == 'i' && name[9] == 'm') || name[8] == 'e'))
-	Log("ArenaMarshall clone", (size_t)src, (size_t)p, name, (size_t)vdst);
-	return p;
+#ifdef LOGGING
+
+		Log("ArenaMarshal clone", (size_t)src, (size_t)p, name, (size_t)vdst);
+		VerifyObject((Object*)p);
+#endif
+		return p;
 }
 
 void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int ioffset, size_t size)
 {
-#if DEBUG
-	//Log((char*)pMT->GetDebugClassName(), 0, 0, "clonearray");
-#endif
+
 	TypeHandle arrayTypeHandle = ArrayBase::GetTypeHandle(pMT);
 	ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
 	TypeHandle ty = ar->GetArrayElementTypeHandle();
@@ -523,76 +527,52 @@ void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int i
 	ArrayBase* refArray = (ArrayBase*)src;
 	DWORD numComponents = refArray->GetNumComponents();
 	const CorElementType arrayElType = ty.GetVerifierCorElementType();
-	// copy pMT
-	*((size_t*)dst) = *((size_t*)src);
-	// copy array length
-	*((size_t*)dst + 1) = *((size_t*)src + 1);
 
 	switch (arrayElType) {
 
-	case ELEMENT_TYPE_I1:
-	case ELEMENT_TYPE_U1:
-	case ELEMENT_TYPE_BOOLEAN:
-	case ELEMENT_TYPE_I2:
-	case ELEMENT_TYPE_U2:
-	case ELEMENT_TYPE_CHAR:
-	case ELEMENT_TYPE_I4:
-	case ELEMENT_TYPE_U4:
-	case ELEMENT_TYPE_R4:
-		IN_WIN32(case ELEMENT_TYPE_I:)
-			IN_WIN32(case ELEMENT_TYPE_U:)
-			case ELEMENT_TYPE_I8:
-			case ELEMENT_TYPE_U8:
-			case ELEMENT_TYPE_R8:
-				IN_WIN64(case ELEMENT_TYPE_I:)
-					IN_WIN64(case ELEMENT_TYPE_U:)
-					break;
-					case ELEMENT_TYPE_FNPTR:
-					case ELEMENT_TYPE_PTR:
-						break;
-					case ELEMENT_TYPE_VALUETYPE:
-						for (size_t i = ioffset; i < ioffset + numComponents*componentSize; i += componentSize)
-						{
-							CloneClass((char*)dst + i, (Object*)((char*)src + i), ty.AsMethodTable(), 0, componentSize);
-						}
+	case ELEMENT_TYPE_VALUETYPE:
+		for (size_t i = ioffset; i < ioffset + numComponents*componentSize; i += componentSize)
+		{
+			CloneClass((char*)dst + i , (Object*)((char*)src + i), ty.AsMethodTable(), 0, componentSize);
+		}
 
-						break;
-					case ELEMENT_TYPE_STRING:
-						break;
-					case ELEMENT_TYPE_CLASS: // objectrefs
-					{
-						// because ArenaMarshall can trigger
-						// a GC, it is necessary to put memory
-						// in a GC safe state first.
-						for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
-						{
-							void** rdst = (void**)((char*)dst + i);
-							*rdst = nullptr;
-						}
+		break;
+	case ELEMENT_TYPE_STRING:
+		break;
+	case ELEMENT_TYPE_CLASS: // objectrefs
+	{
+		// because ArenaMarshal can trigger
+		// a GC, it is necessary to put memory
+		// in a GC safe state first.
+		for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
+		{
+			void** rdst = (void**)((char*)dst + i);
+			*rdst = nullptr;
+		}
 
-						for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
-						{
-							OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + i);
-							if (pSrc != nullptr && (size_t)pSrc < arenaRangeEnd)
-							{
-								void* clone = ArenaMarshall(dst, pSrc);
-								void** rdst = (void**)((char*)dst + i);
-								*rdst = clone;
-								//Log("memwriteptr", (size_t)rdst, (size_t)clone);
-							}
-						}
-					}
+		for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
+		{
+			OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + i);
+			if (pSrc != nullptr && (size_t)pSrc < arenaRangeEnd)
+			{
+				void* clone = ArenaMarshal(dst, pSrc);
+				void** rdst = (void**)((char*)dst + i);
+				*rdst = clone;
+				//Log("memwriteptr", (size_t)rdst, (size_t)clone);
+			}
+		}
+	}
 
-					break;
-					case ELEMENT_TYPE_OBJECT:
-						break;
-					case ELEMENT_TYPE_SZARRAY:      // single dim, zero
-						break;
-					case ELEMENT_TYPE_ARRAY:        // all other arrays
-													// this is where we recursively follow
-						break;
-					default:
-						_ASSERTE(!"Unrecognized primitive type in ArrayHelper::TrySZIndexOf");
+	break;
+	case ELEMENT_TYPE_OBJECT:
+		break;
+	case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+		break;
+	case ELEMENT_TYPE_ARRAY:        // all other arrays
+									// this is where we recursively follow
+		break;
+	default:
+		break;
 	}
 }
 
@@ -603,10 +583,14 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 #endif
 
 	auto pCurrMT = mt;
+#ifdef LOGGING
+	START_NOT_ARENA_SECTION
 	DefineFullyQualifiedNameForClass();
 	char* name = (char*)GetFullyQualifiedNameForClass(mt);
-	if (name[7] == 'T' && ((name[8] == 'i' && name[9] == 'm') || name[8] == 'e'))
-	Log("CloneClass", (size_t)src, classSize, name);
+		Log("CloneClass", (size_t)src, classSize, name);
+	END_NOT_ARENA_SECTION
+#endif
+
 	while (pCurrMT)
 	{
 		DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
@@ -659,7 +643,7 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 				{
 
 					void** rdst = (void**)((char*)dst + offset);
-					// because ArenaMarshall can trigger a GC
+					// because ArenaMarshal can trigger a GC
 					// it is necessary to put memory in a GC
 					// safe state first.
 					*rdst = nullptr;
@@ -726,12 +710,12 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 				{
 
 					void** rdst = (void**)((char*)dst + offset);
-					// because ArenaMarshall can trigger a GC
+					// because ArenaMarshal can trigger a GC
 					// it is necessary to put memory in a GC
 					// safe state first.
-					void* clone = ArenaMarshall((void*)rdst, pSrc);
+					void* clone = ArenaMarshal((void*)rdst, pSrc);
 					*rdst = clone;
-					//Log("ArenaMarshall ptr", (size_t)rdst, (size_t)clone);
+					//Log("ArenaMarshal ptr", (size_t)rdst, (size_t)clone);
 				}
 			}
 			break;
@@ -803,7 +787,7 @@ void ArenaManager::CloneClass1(void* dst, Object* src, PTR_MethodTable mt, int i
 				{
 
 					void** rdst = (void**)((char*)dst + offset);
-					// because ArenaMarshall can trigger a GC
+					// because ArenaMarshal can trigger a GC
 					// it is necessary to put memory in a GC
 					// safe state first.
 					*rdst = nullptr;
@@ -818,7 +802,163 @@ void ArenaManager::CloneClass1(void* dst, Object* src, PTR_MethodTable mt, int i
 
 		pCurrMT = pCurrMT->GetParentMethodTable();
 	}
+
 }
+
+#ifdef LOGGING
+void ArenaManager::VerifyObject(Object* o, MethodTable* pMT0)
+{
+	if (o == nullptr) return;
+	MethodTable* pMT = pMT0;
+
+	if (pMT == nullptr)
+	{
+		pMT = o->GetMethodTable();
+	}
+	else
+	{
+		// if value type, pMT is not at location 0, so back up the object pointer
+		o = (Object*)((Object*)o - 1);
+	}
+
+	DefineFullyQualifiedNameForClass();
+	char* name = (char*)GetFullyQualifiedNameForClass(pMT);
+	Log("Verify Object ", (size_t)o, (size_t)pMT, name, (size_t)(pMT->GetBaseSize()));
+
+	if (pMT->IsArray())
+	{
+		VerifyArray(o,pMT);
+	}
+	else
+	{
+		VerifyClass(o,pMT);
+	}
+}
+
+
+void ArenaManager::VerifyClass(Object* o, MethodTable* pMT)
+{
+	auto pCurrMT = pMT;
+	int ioffset = 8;
+	int classSize = pCurrMT->GetBaseSize();
+	while (pCurrMT)
+	{
+		DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
+		if (numInstanceFields == 0) break;
+
+		FieldDesc *pSrcFields = pCurrMT->GetApproxFieldDescListRaw();
+		if (pSrcFields == nullptr) break;
+
+		for (DWORD i = 0; i < numInstanceFields; i++)
+		{
+			FieldDesc f = pSrcFields[i];
+			if (f.IsStatic()) continue;
+			CorElementType type = f.GetFieldType();
+			DWORD offset = f.GetOffset() + ioffset;
+			if (offset >= (DWORD)classSize)
+			{
+				continue;
+			}
+
+#ifdef DEBUG
+			LPCUTF8 szFieldName = f.GetDebugName();
+			//Log((char*)szFieldName, offset, 0, "field");
+#endif
+
+
+			switch (type) {
+
+			case ELEMENT_TYPE_VALUETYPE:
+			{
+				TypeHandle th = LoadExactFieldType(&pSrcFields[i], pCurrMT, GetAppDomain());
+				
+				Object* o2 = (Object*)((char*)o + offset);
+				VerifyObject(o2,th.AsMethodTable());
+			}
+			break;
+			case ELEMENT_TYPE_PTR:
+			case ELEMENT_TYPE_FNPTR:
+				// pointers may be dangerous, but they are
+				// copied without chang
+				break;
+			case ELEMENT_TYPE_STRING:
+			case ELEMENT_TYPE_CLASS: // objectrefs
+			case ELEMENT_TYPE_OBJECT:
+			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+			case ELEMENT_TYPE_ARRAY:        // all other arrays
+			{
+				Object* o2 = *(Object**)((char*)o + offset);
+				VerifyObject(o2);
+			}
+			break;
+			default:
+				break;
+			}
+		}
+
+		pCurrMT = pCurrMT->GetParentMethodTable();
+	}
+}
+
+void ArenaManager::VerifyArray(Object* o, MethodTable* pMT)
+{
+	int ioffset = 16;
+	
+	TypeHandle arrayTypeHandle = ArrayBase::GetTypeHandle(pMT);
+	ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
+	TypeHandle ty = ar->GetArrayElementTypeHandle();
+	int componentSize = pMT->RawGetComponentSize();
+	ArrayBase* refArray = (ArrayBase*)o;
+	DWORD numComponents = refArray->GetNumComponents();
+	const CorElementType arrayElType = ty.GetVerifierCorElementType();
+
+	switch (arrayElType) {
+
+	case ELEMENT_TYPE_VALUETYPE:
+		for (size_t i = ioffset; i < ioffset + numComponents*componentSize; i += componentSize)
+		{
+			VerifyObject((Object*)((char*)o + i), ty.AsMethodTable());
+		}
+
+		break;
+	case ELEMENT_TYPE_STRING:
+		break;
+	case ELEMENT_TYPE_CLASS: // objectrefs
+	{
+		for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
+		{
+			Object* o2 = *(Object**)((char*)o + i);
+			VerifyObject(o2);
+		}	
+	}
+
+	break;
+	case ELEMENT_TYPE_OBJECT:
+		for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
+		{
+			Object* o2 = *(Object**)((char*)o + i);
+			VerifyObject(o2);
+		}			break;
+	case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+		for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
+		{
+			Object* o2 = *(Object**)((char*)o + i);
+			VerifyObject(o2);
+		}			break;
+	case ELEMENT_TYPE_ARRAY:        // all other arrays
+									// this is where we recursively follow
+		for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
+		{
+			Object* o2 = *(Object**)((char*)o + i);
+			VerifyObject(o2);
+		}	
+		break;
+	default:
+		break;
+	}
+}
+
+#endif
 
 // Given a FieldDesc which may be representative and an object which contains said field, return the actual type of the field. This
 // works even when called from a different appdomain from which the type was loaded (though naturally it is the caller's
