@@ -1,16 +1,15 @@
 // Licensed to the .NET Foundation under one or more agreements.
-// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
 /*
- * GCHELPERS.CPP
- *
- * GC Allocation and Write Barrier Helpers
- *
+* GCHELPERS.CPP
+*
+* GC Allocation and Write Barrier Helpers
+*
 
- *
- */
+*
+*/
 
 #include "common.h"
 #include "object.h"
@@ -18,7 +17,6 @@
 #include "eetwain.h"
 #include "eeconfig.h"
 #include "gc.h"
-#include "..\gc\Arena\arenaManager.h"
 #include "corhost.h"
 #include "threads.h"
 #include "fieldmarshaler.h"
@@ -38,11 +36,11 @@
 
 #include "rcwwalker.h"
 
- //========================================================================
- //
- //      ALLOCATION HELPERS
- //
- //========================================================================
+//========================================================================
+//
+//      ALLOCATION HELPERS
+//
+//========================================================================
 
 #define ProfileTrackArrayAlloc(orObject) \
             OBJECTREF objref = ObjectToOBJECTREF((Object*)orObject);\
@@ -81,8 +79,8 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
 	} CONTRACTL_END;
 
 	_ASSERTE(!NingenEnabled() && "You cannot allocate managed objects inside the ngen compilation process.");
@@ -99,11 +97,6 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 		(bFinalize ? GC_ALLOC_FINALIZE : 0));
 
 	Object *retVal = NULL;
-	retVal = (Object *)::ArenaManager::Allocate(size,flags);
-	if (retVal != nullptr) 
-	{
-		return retVal;
-	}
 
 	// We don't want to throw an SO during the GC, so make sure we have plenty
 	// of stack before calling in.
@@ -113,7 +106,6 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	else
 		retVal = GCHeap::GetGCHeap()->Alloc(size, flags);
 	END_INTERIOR_STACK_PROBE;
-	::ArenaManager::RegisterAddress(retVal);
 	return retVal;
 }
 
@@ -124,8 +116,8 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
 	} CONTRACTL_END;
 
 	DWORD flags = ((bContainsPointers ? GC_ALLOC_CONTAINS_REF : 0) |
@@ -133,13 +125,6 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
 		(bAlignBias ? GC_ALLOC_ALIGN8_BIAS : 0));
 
 	Object *retVal = NULL;
-	retVal = (Object *)::ArenaManager::Allocate(size);
-	if (retVal != nullptr)
-	{
-
-		::ArenaManager::Log("AllocateObject arena2", retVal, size);
-		return retVal;
-	}
 
 	// We don't want to throw an SO during the GC, so make sure we have plenty
 	// of stack before calling in.
@@ -150,8 +135,6 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
 		retVal = GCHeap::GetGCHeap()->AllocAlign8(size, flags);
 
 	END_INTERIOR_STACK_PROBE;
-	::ArenaManager::RegisterAddress(retVal);
-	::ArenaManager::Log("AllocateObject GC2", retVal, size);
 	return retVal;
 }
 #endif // FEATURE_64BIT_ALIGNMENT
@@ -166,8 +149,8 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative (don't assume large heap doesn't compact!)
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative (don't assume large heap doesn't compact!)
 	} CONTRACTL_END;
 
 
@@ -185,22 +168,12 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 		(bFinalize ? GC_ALLOC_FINALIZE : 0));
 
 	Object *retVal = NULL;
-	retVal = (Object *)::ArenaManager::Allocate(size,flags);
-	if (retVal != nullptr)
-	{
-
-		::ArenaManager::Log("AllocateObject arena3", (size_t)retVal, size);
-		return retVal;
-	}
-
 
 	// We don't want to throw an SO during the GC, so make sure we have plenty
 	// of stack before calling in.
 	INTERIOR_STACK_PROBE_FOR(GetThread(), static_cast<unsigned>(DEFAULT_ENTRY_PROBE_AMOUNT * 1.5));
 	retVal = GCHeap::GetGCHeap()->AllocLHeap(size, flags);
 	END_INTERIOR_STACK_PROBE;
-	::ArenaManager::Log("AllocateObject GC3", (size_t)retVal, size);
-	::ArenaManager::RegisterAddress(retVal);
 	return retVal;
 }
 
@@ -236,8 +209,8 @@ inline void LogAlloc(size_t size, MethodTable *pMT, Object* object)
 	CONTRACTL
 	{
 		NOTHROW;
-		GC_NOTRIGGER;
-		MODE_COOPERATIVE;
+	GC_NOTRIGGER;
+	MODE_COOPERATIVE;
 	}
 	CONTRACTL_END;
 
@@ -278,8 +251,8 @@ OBJECTREF AllocateValueSzArray(TypeHandle elementType, INT32 length)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative        
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative        
 	} CONTRACTL_END;
 
 	return AllocateArrayEx(elementType.MakeSZArray(), &length, 1);
@@ -310,10 +283,10 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
-		PRECONDITION(CheckPointer(pArgs));
-		PRECONDITION(dwNumArgs > 0);
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	PRECONDITION(CheckPointer(pArgs));
+	PRECONDITION(dwNumArgs > 0);
 	} CONTRACTL_END;
 
 	ArrayBase * orArray = NULL;
@@ -404,15 +377,12 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	if (maxArrayDimensionLengthOverflow)
 		ThrowOutOfMemoryDimensionsExceeded();
 
-	
 	// Allocate the space from the GC heap
 	S_SIZE_T safeTotalSize = S_SIZE_T(cElements) * S_SIZE_T(componentSize) + S_SIZE_T(pArrayMT->GetBaseSize());
 	if (safeTotalSize.IsOverflow())
 		ThrowOutOfMemoryDimensionsExceeded();
 
 	size_t totalSize = safeTotalSize.Value();
-
-	
 
 #ifdef FEATURE_DOUBLE_ALIGNMENT_HINT
 	if ((elemType == ELEMENT_TYPE_R8) &&
@@ -453,7 +423,8 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	// Initialize Object
 	orArray->m_NumComponents = cElements;
 
-	if (bAllocateInLargeHeap || totalSize >= LARGE_OBJECT_SIZE) 
+	if (bAllocateInLargeHeap ||
+		(totalSize >= LARGE_OBJECT_SIZE))
 	{
 		GCHeap::GetGCHeap()->PublishObject((BYTE*)orArray);
 	}
@@ -553,16 +524,16 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 }
 
 /*
- * Allocates a single dimensional array of primitive types.
- */
+* Allocates a single dimensional array of primitive types.
+*/
 OBJECTREF   AllocatePrimitiveArray(CorElementType type, DWORD cElements, BOOL bAllocateInLargeHeap)
 {
 	CONTRACTL
 	{
 		THROWS;
-		GC_TRIGGERS;
-		INJECT_FAULT(COMPlusThrowOM());
-		MODE_COOPERATIVE;  // returns an objref without pinning it => cooperative
+	GC_TRIGGERS;
+	INJECT_FAULT(COMPlusThrowOM());
+	MODE_COOPERATIVE;  // returns an objref without pinning it => cooperative
 	}
 		CONTRACTL_END
 
@@ -585,16 +556,16 @@ OBJECTREF   AllocatePrimitiveArray(CorElementType type, DWORD cElements, BOOL bA
 }
 
 /*
- * Allocates a single dimensional array of primitive types.
- */
+* Allocates a single dimensional array of primitive types.
+*/
 
 OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL bAllocateInLargeHeap)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
-		PRECONDITION(pMT->CheckInstanceActivated());
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	PRECONDITION(pMT->CheckInstanceActivated());
 	} CONTRACTL_END;
 
 #ifdef _DEBUG
@@ -626,11 +597,9 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 	BOOL bPublish = bAllocateInLargeHeap;
 
 	ArrayBase* orObject;
-
 	if (bAllocateInLargeHeap)
 	{
 		orObject = (ArrayBase*)AllocLHeap(totalSize, FALSE, FALSE);
-		
 	}
 	else
 	{
@@ -666,8 +635,6 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 			}
 			_ASSERTE(((size_t)orObject % sizeof(double)) == 0);
 			orDummyObject->SetMethodTable(g_pObjectClass);
-			
-
 		}
 		else
 		{
@@ -725,8 +692,8 @@ OBJECTREF   DupArrayForCloning(BASEARRAYREF pRef, BOOL bAllocateInLargeHeap)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
 	} CONTRACTL_END;
 
 	ArrayTypeDesc arrayType(pRef->GetMethodTable(), pRef->GetArrayElementTypeHandle());
@@ -760,8 +727,8 @@ OBJECTREF AllocatePrimitiveArray(CorElementType type, DWORD cElements)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
 	} CONTRACTL_END;
 
 #ifdef _DEBUG
@@ -779,8 +746,8 @@ OBJECTREF AllocateObjectArray(DWORD cElements, TypeHandle ElementType)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
 	} CONTRACTL_END;
 
 
@@ -806,8 +773,8 @@ STRINGREF AllocateString(DWORD cchStringLength)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
 	} CONTRACTL_END;
 
 #ifdef _DEBUG
@@ -829,8 +796,8 @@ OBJECTREF   AllocateObjectArray(DWORD cElements, TypeHandle elementType, BOOL bA
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
 	} CONTRACTL_END;
 
 	OVERRIDE_TYPE_LOAD_LEVEL_LIMIT(CLASS_LOADED);
@@ -856,8 +823,8 @@ STRINGREF SlowAllocateString(DWORD cchStringLength)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
 	} CONTRACTL_END;
 
 	StringObject    *orObject = NULL;
@@ -881,6 +848,7 @@ STRINGREF SlowAllocateString(DWORD cchStringLength)
 	SetTypeHandleOnThreadForAlloc(TypeHandle(g_pStringClass));
 
 	orObject = (StringObject *)Alloc(ObjectSize, FALSE, FALSE);
+
 	// Object is zero-init already
 	_ASSERTE(orObject->HasEmptySyncBlockInfo());
 
@@ -889,7 +857,7 @@ STRINGREF SlowAllocateString(DWORD cchStringLength)
 	orObject->SetMethodTable(g_pStringClass);
 	orObject->SetStringLength(cchStringLength);
 
-	if (ObjectSize >= LARGE_OBJECT_SIZE) 
+	if (ObjectSize >= LARGE_OBJECT_SIZE)
 	{
 		GCHeap::GetGCHeap()->PublishObject((BYTE*)orObject);
 	}
@@ -929,10 +897,10 @@ void AllocateComClassObject(ComClassFactory* pComClsFac, OBJECTREF* ppRefClass)
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref (out param) without pinning it => cooperative
-		PRECONDITION(CheckPointer(pComClsFac));
-		PRECONDITION(CheckPointer(ppRefClass));
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref (out param) without pinning it => cooperative
+	PRECONDITION(CheckPointer(pComClsFac));
+	PRECONDITION(CheckPointer(ppRefClass));
 	} CONTRACTL_END;
 
 	// Create a COM+ Class object.
@@ -967,10 +935,10 @@ OBJECTREF AllocateObject(MethodTable *pMT
 {
 	CONTRACTL{
 		THROWS;
-		GC_TRIGGERS;
-		MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
-		PRECONDITION(CheckPointer(pMT));
-		PRECONDITION(pMT->CheckInstanceActivated());
+	GC_TRIGGERS;
+	MODE_COOPERATIVE; // returns an objref without pinning it => cooperative
+	PRECONDITION(CheckPointer(pMT));
+	PRECONDITION(pMT->CheckInstanceActivated());
 	} CONTRACTL_END;
 
 	Object     *orObject = NULL;
@@ -1019,18 +987,16 @@ OBJECTREF AllocateObject(MethodTable *pMT
 		else
 #endif // FEATURE_64BIT_ALIGNMENT
 		{
-
 			orObject = (Object *)Alloc(baseSize,
 				pMT->HasFinalizer(),
 				pMT->ContainsPointers());
 		}
 
 		// verify zero'd memory (at least for sync block)
-
-			// Object is zero-init already
 		_ASSERTE(orObject->HasEmptySyncBlockInfo());
 
-		if (baseSize >= LARGE_OBJECT_SIZE)
+
+		if ((baseSize >= LARGE_OBJECT_SIZE))
 		{
 			orObject->SetMethodTableForLargeObject(pMT);
 			GCHeap::GetGCHeap()->PublishObject((BYTE*)orObject);

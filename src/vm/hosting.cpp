@@ -314,7 +314,7 @@ LPVOID EEVirtualAlloc(LPVOID lpAddress, SIZE_T dwSize, DWORD flAllocationType, D
 		// Hack to discover errors in using VirtualAlloc
 		if (p == NULL)
 		{
-			DWORD err = GetLastError(); // ERROR_INVALID_PARAMETER=57
+			DWORD err = GetLastError(); // ERROR_INVALID_PARAMETER=57, Error code 487 (ERROR_INVALID_ADDRESS) .
 			printf("error %d", err);
 		}
 #ifdef _DEBUG

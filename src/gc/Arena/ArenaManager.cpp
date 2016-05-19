@@ -298,10 +298,10 @@ void* ArenaManager::Allocate(ArenaThread* arena, size_t jsize)
 	return (void*)((char*)ret);
 }
 
-namespace WKS
-{
-	extern int hcnt;
-}
+//namespace WKS
+//{
+//	extern int hcnt;
+//}
 
 int ArenaManager::lcnt = 0;
 void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr, size_t n3)
@@ -333,9 +333,9 @@ void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr, size_t n3)
 
 	_itoa(lcnt++, pbuf, 10);
 	pbufI = strlen(pbuf); 
-	pbuf[pbufI++] = ',';
-	_itoa(WKS::hcnt, pbuf + pbufI, 10);
-	pbufI = strlen(pbuf);
+	//pbuf[pbufI++] = ',';
+	//_itoa(WKS::hcnt, pbuf + pbufI, 10);
+	//pbufI = strlen(pbuf);
 	pbuf[pbufI++] = '[';
 
 	_itoa(tid, pbuf + pbufI, 10);

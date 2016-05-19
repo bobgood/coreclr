@@ -10,7 +10,7 @@
 // file:../../doc/BookOfTheRuntime/GC/GCDesign.doc
 // 
 // This file includes both the code for GC and the allocator. The most common
-// case for a GC to be triggered is from the allocator code. Senamespace WKSe
+// case for a GC to be triggered is from the allocator code. See
 // code:#try_allocate_more_space where it calls GarbageCollectGeneration.
 // 
 // Entry points for the allocate is GCHeap::Alloc* which are called by the
@@ -18,23 +18,6 @@
 // 
 
 #include "gcpriv.h"
-
-HANDLE hFile;
-__declspec(noinline)
-void Stop()
-{
-	printf("assert\n");
-	DWORD written;
-	WriteFile(hFile, "assert\n", (DWORD)strlen("assert\n"), &written, 0);
-	FlushFileBuffers(hFile);
-
-
-#ifndef DACCESS_COMPILE
-	GCToOSInterface::DebugBreak();
-#endif
-}
-#undef assert
-#define assert(x) if (!(x)) {Stop();}
 
 #define USE_INTROSORT
 
@@ -419,12 +402,6 @@ void log_va_msg(const char *fmt, va_list args)
     buffer_start += pid_len;
     memset(&pBuffer[buffer_start], '-', BUFFERSIZE - buffer_start);
     int msg_len = _vsnprintf(&pBuffer[buffer_start], BUFFERSIZE - buffer_start, fmt, args );
-	if (msg_len > 0)
-	{
-		DWORD written;
-		WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), pBuffer, (DWORD)msg_len, &written, 0);
-		return;
-	}
     if (msg_len == -1)
     {
         msg_len = BUFFERSIZE - buffer_start;
@@ -458,37 +435,17 @@ void log_va_msg(const char *fmt, va_list args)
     gc_log_lock.Leave();
 }
 
-int hcnt = 0;
-void GCLog (const char *fmt, ... )
+
+void GCLog(const char *fmt, ...)
 {
-	if (hFile == (HANDLE)0xffffffff || hFile == 0)
+	if (gc_log_on && (gc_log != NULL))
 	{
-		//hFile = GetStdHandle(STD_OUTPUT_HANDLE);
-		hFile = ::CreateFileA("log.txt",                // name of the write
-			GENERIC_WRITE,          // open for writing
-			FILE_SHARE_READ,                      // do not share
-			NULL,                   // default security
-			CREATE_ALWAYS,             // create new file only
-			FILE_ATTRIBUTE_NORMAL,  // normal file
-			NULL);                  // no attr. template
+
+		va_list     args;
+		va_start(args, fmt);
+		log_va_msg(fmt, args);
+		va_end(args);
 	}
-	char buffer[1024];
-	_itoa(hcnt++, buffer, 10);
-	size_t I = strlen(buffer);
-	buffer[I++] = ':';
-	buffer[I++] = ' ';
-	buffer[I++] = 'G';
-	buffer[I++] = 'C';
-	buffer[I++] = ' ';
-	va_list     args;
-    va_start(args, fmt);
-	vsprintf_s(buffer+I, 1000, fmt, args);
-	I = strlen(buffer);
-	buffer[I++] = '\n';
-    va_end(args);	
-	buffer[I] = 0;
-	DWORD written;
-	WriteFile(hFile, buffer, (DWORD)I, &written, 0);
 }
 #endif // TRACE_GC && !DACCESS_COMPILE
 
@@ -1891,8 +1848,7 @@ void memcopy (uint8_t* dmem, uint8_t* smem, size_t size)
             ((PTR_PTR)dmem)[3] = ((PTR_PTR)smem)[3];
             dmem += sz4ptr;
             smem += sz4ptr;
-        }
-        while ((size -= sz4ptr) >= sz4ptr);
+        } while ((size -= sz4ptr) >= sz4ptr);
     }
 
     // still two pointer sized things or more left to copy?
@@ -5725,7 +5681,9 @@ void gc_heap::fix_large_allocation_area (BOOL for_gc_p)
 {
     UNREFERENCED_PARAMETER(for_gc_p);
 
+#ifdef _DEBUG
     alloc_context* acontext = 
+#endif // _DEBUG
         generation_alloc_context (large_object_generation);
     assert (acontext->alloc_ptr == 0);
     assert (acontext->alloc_limit == 0); 
@@ -7888,8 +7846,7 @@ void gc_heap::sort_mark_list()
                 heap_num = 0;
             assert(heap_num != last_heap_num); // we should always find the heap - infinite loop if not!
             heap = g_heaps[heap_num];
-        }
-        while (!(*x >= heap->ephemeral_low && *x < heap->ephemeral_high));
+        } while (!(*x >= heap->ephemeral_low && *x < heap->ephemeral_high));
 
         // x is the start of the mark list piece for this heap
         mark_list_piece_start[heap_num] = x;
@@ -7919,8 +7876,7 @@ void gc_heap::sort_mark_list()
                 {
                     break;
                 }
-            }
-            while (predicate(x));
+            } while (predicate(x));
             // we know that only the last step was wrong, so we undo it
             x -= inc;
             do
@@ -7932,8 +7888,7 @@ void gc_heap::sort_mark_list()
                 {
                     x += inc;
                 }
-            }
-            while (inc > 1);
+            } while (inc > 1);
             // the termination condition and the loop invariant together imply this:
             assert(predicate(x) && !predicate(x + inc) && (inc == 1));
             // so the spot we're looking for is one further
@@ -9718,7 +9673,8 @@ HRESULT gc_heap::initialize_gc (size_t segment_size,
     if ((can_use_write_watch() && reserved_memory >= th))
     {
         settings.card_bundles = TRUE;
-    } else
+    }
+	else
     {
         settings.card_bundles = FALSE;
     }
@@ -13073,8 +13029,7 @@ try_again:
                             max_alloc_context_count = hp_alloc_context_count;
                         }
                     }
-                }
-                while (org_alloc_context_count != org_hp->alloc_context_count ||
+                } while (org_alloc_context_count != org_hp->alloc_context_count ||
                        max_alloc_context_count != max_hp->alloc_context_count);
 
                 if ((max_hp == org_hp) && (end < finish))
@@ -13231,8 +13186,7 @@ BOOL gc_heap::allocate_more_space(alloc_context* acontext, size_t size,
 #else
         status = try_allocate_more_space (acontext, size, alloc_generation_number);
 #endif //MULTIPLE_HEAPS
-    }
-    while (status == -1);
+    } while (status == -1);
     
     return (status != 0);
 }
@@ -16792,11 +16746,6 @@ inline // This causes link errors if global optimization is off
 #endif //!_DEBUG && !__GNUC__
 gc_heap* gc_heap::heap_of (uint8_t* o)
 {
-	if (ISARENA(o))
-	{
-		// BOB
-		return nullptr;
-	}
 #ifdef MULTIPLE_HEAPS
     if (o == 0)
         return g_heaps [0];
@@ -16817,11 +16766,6 @@ gc_heap* gc_heap::heap_of (uint8_t* o)
 inline
 gc_heap* gc_heap::heap_of_gc (uint8_t* o)
 {
-	if (ISARENA(o))
-	{
-		// BOB
-		return nullptr;
-	}
 #ifdef MULTIPLE_HEAPS
     if (o == 0)
         return g_heaps [0];
@@ -17039,12 +16983,8 @@ BOOL gc_heap::gc_mark (uint8_t* o, uint8_t* low, uint8_t* high)
     {
         //find the heap
         gc_heap* hp = heap_of_gc (o);
-		if (hp == nullptr)
-		{
-			// BOB
-			return false;
-		}
-
+	
+		assert(hp);
         if ((o >= hp->gc_low) && (o < hp->gc_high))
             marked = gc_mark1 (o);
     }
@@ -17101,12 +17041,7 @@ BOOL gc_heap::background_mark (uint8_t* o, uint8_t* low, uint8_t* high)
     {
         //find the heap
         gc_heap* hp = heap_of (o);
-		if (hp == nullptr)
-		{
-			// BOB
-			return false;
-		}
-        
+		assert(hp);      
         if ((o >= hp->background_saved_lowest_address) && (o < hp->background_saved_highest_address))
             marked = background_mark1 (o);
     }
@@ -17978,11 +17913,6 @@ gc_heap::ha_mark_object_simple (uint8_t** po THREAD_NUMBER_DCL)
             !((ref >= current_obj) && (ref < (current_obj + current_obj_size))))
         {
             gc_heap* hp = gc_heap::heap_of (ref);
-			if (hp == nullptr)
-			{
-				// BOB
-				return;
-			}
             current_obj = hp->find_object (ref, hp->lowest_address);
             current_obj_size = size (current_obj);
 
@@ -18044,12 +17974,7 @@ uint8_t* gc_heap::mark_object (uint8_t* o THREAD_NUMBER_DCL)
     {
         //find the heap
         gc_heap* hp = heap_of (o);
-		if (hp == nullptr)
-		{
-			// BOB
-			return o;
-		}
-
+		assert(hp);
 		if ((o >= hp->gc_low) && (o < hp->gc_high))
             mark_object_simple (&o THREAD_NUMBER_ARG);
     }
@@ -18315,12 +18240,6 @@ void gc_heap::background_verify_mark (Object*& object, ScanContext* sc, uint32_t
     uint8_t* o = (uint8_t*)object;
 
     gc_heap* hp = gc_heap::heap_of (o);
-	if (hp == nullptr)
-	{
-		// BOB
-		return;
-	}
-
 #ifdef INTERIOR_POINTERS
     if (flags & GC_CALL_INTERIOR)
     {
@@ -18360,12 +18279,6 @@ void gc_heap::background_promote (Object** ppObject, ScanContext* sc, uint32_t f
     HEAP_FROM_THREAD;
 
     gc_heap* hp = gc_heap::heap_of (o);
-	if (hp == nullptr)
-	{
-		// BOB
-		return;
-	}
-
     if ((o < hp->background_saved_lowest_address) || (o >= hp->background_saved_highest_address))
     {
         return;
@@ -23267,10 +23180,11 @@ uint8_t* tree_search (uint8_t* tree, uint8_t* old_address)
                 tree = tree + cn;
                 Prefetch (tree - 8);
                 continue;
-            }
-            else
+            } 
+			else
                 break;
-        } else
+        } 
+		else
             break;
     }
     if (tree <= old_address)
@@ -23310,12 +23224,6 @@ void gc_heap::relocate_address (uint8_t** pold_address THREAD_NUMBER_DCL)
         if (old_address == 0)
             return;
         gc_heap* hp = heap_of (old_address);
-		if (hp == nullptr)
-		{
-			// BOB
-			return;
-		}
-
         if ((hp == this) ||
             !((old_address >= hp->gc_low) && (old_address < hp->gc_high)))
             return;
@@ -23437,12 +23345,6 @@ gc_heap::check_demotion_helper (uint8_t** pval, uint8_t* parent_obj)
     {
         dprintf (4, ("Demotion active, computing heap_of object"));
         gc_heap* hp = heap_of (*pval);
-		if (hp == nullptr)
-		{
-			// BOB
-			return;
-		}
-
 		if ((*pval < hp->demotion_high) &&
             (*pval >= hp->demotion_low))
         {
@@ -23513,12 +23415,6 @@ void gc_heap::reloc_ref_in_shortened_obj (uint8_t** address_to_set_card, uint8_t
     else if (settings.demotion)
     {
         gc_heap* hp = heap_of (relocated_addr);
-		if (hp == nullptr)
-		{
-			// BOB
-			return;
-		}
-
 		if ((relocated_addr < hp->demotion_high) &&
             (relocated_addr >= hp->demotion_low))
         {
@@ -26561,12 +26457,6 @@ void gc_heap::background_promote_callback (Object** ppObject, ScanContext* sc,
     HEAP_FROM_THREAD;
 
     gc_heap* hp = gc_heap::heap_of (o);
-	if (hp == nullptr)
-	{
-		// BOB
-		return;
-	}
-
     if ((o < hp->background_saved_lowest_address) || (o >= hp->background_saved_highest_address))
     {
         return;
@@ -27604,8 +27494,7 @@ gc_heap::keep_card_live (uint8_t* o, size_t& n_gen,
     else if (o)
     {
         gc_heap* hp = heap_of (o);
-		// BOB
-		if (hp != this && hp!=nullptr)
+		if (hp != this)
         {
             if ((hp->gc_low <= o) &&
                 (hp->gc_high > o))
@@ -27635,8 +27524,7 @@ gc_heap::mark_through_cards_helper (uint8_t** poo, size_t& n_gen,
     else if (*poo)
     {
         gc_heap* hp = heap_of_gc (*poo);
-		// BOB
-		if (hp && hp != this)
+		if (hp != this)
         {
             if ((hp->gc_low <= *poo) &&
                 (hp->gc_high > *poo))
@@ -27950,9 +27838,13 @@ go_through_refs:
                                              //new_start();
                                              {
                                                  if (ppstop <= (uint8_t**)start_address)
-                                                     {break;}
+                                                 {
+														 break;
+												 }
                                                  else if (poo < (uint8_t**)start_address)
-                                                     {poo = (uint8_t**)start_address;}
+                                                 {
+														 poo = (uint8_t**)start_address;
+												 }
                                              }
                                         }
                                         else if (foundp && (start_address < limit))
@@ -31998,9 +31890,13 @@ go_through_refs:
                                         //new_start();
                                         {
                                             if (ppstop <= (uint8_t**)start_address)
-                                            {break;}
+                                            {
+												break;
+											}
                                             else if (poo < (uint8_t**)start_address)
-                                            {poo = (uint8_t**)start_address;}
+                                            {
+												poo = (uint8_t**)start_address;
+											}
                                         }
                                     }
                                     else
@@ -33745,9 +33641,7 @@ BOOL GCHeap::IsPromoted(Object* object)
     else
     {
         gc_heap* hp = gc_heap::heap_of (o);
-		// BOB
-		if (hp == nullptr) return false;
-        return (!((o < hp->gc_high) && (o >= hp->gc_low))
+	    return (!((o < hp->gc_high) && (o >= hp->gc_low))
                 || hp->is_mark_set (o));
     }
 }
@@ -33769,12 +33663,6 @@ size_t GCHeap::GetPromotedBytes(int heap_index)
 unsigned int GCHeap::WhichGeneration (Object* object)
 {
     gc_heap* hp = gc_heap::heap_of ((uint8_t*)object);
-	if (hp == nullptr)
-	{
-		// BOB
-		return 3;
-	}
-
     unsigned int g = hp->object_gennum ((uint8_t*)object);
     dprintf (3, ("%Ix is in gen %d", (size_t)object, g));
     return g;
@@ -33783,9 +33671,7 @@ unsigned int GCHeap::WhichGeneration (Object* object)
 BOOL    GCHeap::IsEphemeral (Object* object)
 {
     uint8_t* o = (uint8_t*)object;
-    gc_heap* hp = gc_heap::heap_of (o);
-	// BOB
-	if (hp == nullptr) return false;
+    gc_heap* hp = gc_heap::heap_of (o);	
     return hp->ephemeral_pointer_p (o);
 }
 
@@ -33890,12 +33776,6 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
 
     gc_heap* hp = gc_heap::heap_of (o);
 
-	if (hp == nullptr)
-	{
-		// BOB
-		return;
-	}
-
     dprintf (3, ("Promote %Ix", (size_t)o));
 
 #ifdef INTERIOR_POINTERS
@@ -33976,12 +33856,6 @@ void GCHeap::Relocate (Object** ppObject, ScanContext* sc,
         return;
 
     gc_heap* hp = gc_heap::heap_of (object);
-	if (hp == nullptr)
-	{
-		// BOB
-		return;
-	}
-
 #ifdef _DEBUG
     if (!(flags & GC_CALL_INTERIOR))
     {
@@ -34034,7 +33908,7 @@ void GCHeap::Relocate (Object** ppObject, ScanContext* sc,
     // For now we simply look at the size of the object to determine if it in the
     // fixed heap or not. If the bit indicating this gets set at some point
     // we should key off that instead.
-    return size( pObj ) >= LARGE_OBJECT_SIZE && !ISARENA(pObj);
+    return size( pObj ) >= LARGE_OBJECT_SIZE ;
 }
 
 #ifndef FEATURE_REDHAWK // Redhawk forces relocation a different way
@@ -34789,12 +34663,6 @@ GCHeap::GetContainingObject (void *pInteriorPtr)
     uint8_t *o = (uint8_t*)pInteriorPtr;
 
     gc_heap* hp = gc_heap::heap_of (o);
-	if (hp == nullptr)
-	{
-		// BOB
-		return nullptr;
-	}
-
     if (o >= hp->lowest_address && o < hp->highest_address)
     {
         o = hp->find_object (o, hp->gc_low);
@@ -35752,13 +35620,9 @@ int GCHeap::EndNoGCRegion()
 }
 
 void GCHeap::PublishObject (uint8_t* Obj)
-{
-	if (ISARENA(Obj)) return;
+{	
 #ifdef BACKGROUND_GC
-	if ((size_t)Obj >= ArenaVirtualMemory::arenaBaseRequest) return;
     gc_heap* hp = gc_heap::heap_of (Obj);
-	// BOB
-	if (hp!=nullptr) 
 		hp->bgc_alloc_lock->loh_alloc_done (Obj);
 #endif //BACKGROUND_GC
 }
@@ -35993,12 +35857,6 @@ bool GCHeap::RegisterForFinalization (int gen, Object* obj)
     else
     {
         gc_heap* hp = gc_heap::heap_of ((uint8_t*)obj);
-		if (hp == nullptr)
-		{
-			// BOB
-			return false;
-		}
-
         return hp->finalize_queue->RegisterForFinalization (gen, obj);
     }
 }

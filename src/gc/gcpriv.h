@@ -165,11 +165,13 @@ void GCLogConfig (const char *fmt, ... );
 #define cprintf(x) {GCLogConfig x;}
 #endif //GC_CONFIG_DRIVEN
 
-//#ifdef _DEBUG
+#ifdef _DEBUG
 #define TRACE_GC
 #define SIMPLE_DPRINTF
-//#endif
-
+#endif
+#ifdef SIMPLE_DPRINTF
+#error SIMPLE_DPRINTF
+#endif
 #define NUMBERGENERATIONS   4               //Max number of generations
 
 // For the bestfit algorithm when we relocate ephemeral generations into an 

@@ -3267,9 +3267,7 @@ OBJECTREF MethodTable::AllocateStaticBox(MethodTable* pFieldMT, BOOL fPinned, OB
 	// Activate any dependent modules if necessary
 	pFieldMT->EnsureInstanceActive();
 
-	//START_NOT_ARENA_SECTION
 	OBJECTREF obj = AllocateObject(pFieldMT);
-	//END_NOT_ARENA_SECTION
 
 	// Pin the object if necessary
 	if (fPinned)
@@ -3580,7 +3578,7 @@ void MethodTable::DoRunClassInitThrowing()
 						gc.pInnerException = NULL;
 						gc.pInitException = NULL;
 						gc.pThrowable = NULL;
-							GCPROTECT_BEGIN(gc);
+						GCPROTECT_BEGIN(gc);
 
 						if (!RunClassInitEx(&gc.pInnerException))
 						{
@@ -3638,9 +3636,7 @@ void MethodTable::DoRunClassInitThrowing()
 							// We should be having a valid corruption severity at this point
 							_ASSERTE(pEntry->m_CorruptionSeverity != NotSet);
 #endif // FEATURE_CORRUPTING_EXCEPTIONS
-							DefineFullyQualifiedNameForClass();
-							char* name = (char*)GetFullyQualifiedNameForClass(this);
-							::ArenaManager::Log("Throwing", (size_t)this, 0, name);
+
 							COMPlusThrow(gc.pThrowable
 #ifdef FEATURE_CORRUPTING_EXCEPTIONS
 								, pEntry->m_CorruptionSeverity
@@ -3741,21 +3737,7 @@ void MethodTable::CheckRunClassInitThrowing()
 		pLocalModule->PopulateClass(this);
 
 	if (!pLocalModule->IsClassInitialized(this, iClassIndex))
-	{
-		auto t = pLocalModule->IsClassInitialized(this, iClassIndex);
-		if (!t)
-		{
-
-			t = pLocalModule->IsClassInitialized(this, iClassIndex);
-			if (!t)
-			{
-				DefineFullyQualifiedNameForClass();
-				char* name = (char*)GetFullyQualifiedNameForClass(this);
-
-				DoRunClassInitThrowing();
-			} 
-		}
-	}
+		DoRunClassInitThrowing();
 }
 
 //==========================================================================================

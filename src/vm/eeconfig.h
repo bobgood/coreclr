@@ -9,7 +9,7 @@
 //
 //
 
-#define TRACE_GC
+//#define TRACE_GC
 
 #ifndef EECONFIG_H
 #define EECONFIG_H
@@ -662,7 +662,7 @@ public:
     GCStressFlags GetGCStressLevel()        const { WRAPPER_NO_CONTRACT; SUPPORTS_DAC; return GCStressFlags(iGCStress); }
 #endif
 
-#ifdef TRACE_GC
+#ifdef _DEBUG //TRACE_GC
 
     int     GetGCtraceStart()               const {LIMITED_METHOD_CONTRACT; return iGCtraceStart;  }
     int     GetGCtraceEnd  ()               const {LIMITED_METHOD_CONTRACT;  return iGCtraceEnd;   }

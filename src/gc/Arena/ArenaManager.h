@@ -109,9 +109,7 @@ public:
 	static void* ArenaMarshal(void*, void*);
 
 	static bool IsArenaAddress(void*p) {
-		size_t a = (size_t)p;
-		//return (0 != _bittest64((LONG64*)&a, addressBits - 1));
-		return (a >= ArenaVirtualMemory::arenaBaseRequest);
+		return ((size_t)p >> ArenaVirtualMemory::addressBits) == 1;
 	}
 
 	static bool IsSameArenaAddress(void*p, void*q) {
