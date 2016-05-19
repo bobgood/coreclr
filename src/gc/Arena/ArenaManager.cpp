@@ -1,6 +1,7 @@
 // Hack
 #include "../common.h"
 #include "arenaManager.h"
+
 #include "Arena.h"
 
 #include "../object.h"
@@ -9,14 +10,12 @@
 #include <stdio.h>
 #include <strsafe.h>
 #include "class.h"
+#include "set.h"
 
 #define LOGGING
-namespace WKS
-{
-	extern int hcnt;
-}
 
-size_t ArenaManager::virtualBase;
+ ArenaVirtualMemoryState ArenaVirtualMemory::s;
+
 TypeHandle LoadExactFieldType(FieldDesc *pFD, MethodTable *pEnclosingMT, AppDomain *pDomain);
 
 // lastId keeps track of the last id used to create an arena.  
@@ -30,6 +29,7 @@ void* ArenaManager::arenaById[maxArenas];
 unsigned long ArenaManager::refCount[maxArenas];
 volatile __int64 ArenaManager::totalMemory = 0;
 HANDLE ArenaManager::hFile = 0;
+set verifiedObjects;
 
 void ArenaManager::InitArena()
 {
@@ -39,18 +39,27 @@ void ArenaManager::InitArena()
 		refCount[i] = 0;
 	}
 
-	lastId = 0;
-	virtualBase = (size_t)ClrVirtualAlloc((LPVOID)arenaBaseRequest, maxArenas * (1ULL << arenaAddressShift), MEM_RESERVE, PAGE_NOACCESS);
-	if (virtualBase != arenaBaseRequest)
+	ArenaVirtualMemory::Initialize();
+#ifdef VERIFYALLOC
+	ClrVirtualAlloc((LPVOID)0x60000000000, 1024*1024*1024, MEM_COMMIT, PAGE_READWRITE);
+	*(size_t*)0x60000000000 = 0x60000000008;
+#endif
+}
+
+void ArenaManager::CheckAll()
+{
+#ifdef VERIFYALLOC
+	verifiedObjects.clear();
+	auto p = (size_t**)0x60000000000;
+	for (auto i = (size_t*)0x60000000008; i < *p; i++)
 	{
-		throw "could not reserve virtual address space for arena buffers";
+		VerifyObject(*(Object**)i);
 	}
+#endif
 }
 
 void ArenaManager::DereferenceId(int id)
 {
-
-
 	if (arenaById[id] == nullptr)
 	{
 		Log("*arenaError", id);
@@ -103,16 +112,11 @@ int ArenaManager::getId()
 	throw "insufficient arena allocators";
 }
 
-size_t ArenaManager::IdToAddress(int id)
-{
-	return ((size_t)id << arenaAddressShift) + virtualBase;
-}
-
-int _cdecl ArenaManager::GetArenaId()
+ArenaId _cdecl ArenaManager::GetArenaId()
 {
 	Arena* arena = (Arena*)GetArenaStack().Current();
 	if (arena == nullptr) return -1;
-	return Id(arena);
+	return ArenaVirtualMemory::ArenaNumber(arena);
 }
 
 // Hack
@@ -130,7 +134,7 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 	case 1:
 		for (int i = 0; i < arenaStack.Size(); i++)
 		{
-			DereferenceId(Id(arenaStack[i]));
+			DereferenceId(ArenaVirtualMemory::ArenaNumber(arenaStack[i]));
 		}
 
 		arenaStack.Reset();
@@ -181,11 +185,17 @@ void _cdecl ArenaManager::SetAllocator(unsigned int type)
 	}
 }
 
+void* ArenaManager::GetBuffer(ArenaId arenaId, size_t len)
+{
+	return ArenaVirtualMemory::GetBuffer(arenaId, len);
+}
 
 Arena* ArenaManager::MakeArena()
 {
-	unsigned int id = getId();
-	Arena* arena = Arena::MakeArena(IdToAddress(id));
+	ArenaId id = getId();
+	void* arenaBase = ArenaVirtualMemory::GetBuffer(id);
+
+	Arena* arena = Arena::MakeArena(id, (size_t)arenaBase, ArenaVirtualMemory::bufferSize, ArenaVirtualMemory::arenaBaseSize/4);
 	//Log("Arena is registered ", (size_t)arena);
 	arenaById[id] = arena;
 	return arena;
@@ -206,7 +216,7 @@ void _cdecl ArenaManager::Pop()
 	void* allocator = GetArenaStack().Pop();
 	if (allocator != nullptr)
 	{
-		DereferenceId(Id(allocator));
+		DereferenceId(ArenaVirtualMemory::ArenaNumber(allocator));
 		//Log("Arena Pop", GetArenaStack().Size());
 	}
 	else {
@@ -220,16 +230,11 @@ void* ArenaManager::GetArena()
 	return GetArenaStack().Current();
 }
 
-unsigned int ArenaManager::Id(void * allocator)
-{
-	return (((size_t)allocator) >> arenaAddressShift) & (ArenaMask);
-}
-
 void ArenaManager::DeleteAllocator(void* vallocator)
 {
 	if (vallocator == nullptr) return;
 
-	int id = Id(vallocator);
+	ArenaId id = ArenaVirtualMemory::ArenaNumber(vallocator);
 	Arena* allocator = static_cast<Arena*> (vallocator);
 
 	// do not need to delete, because arena object is embedded in arena memory.
@@ -244,10 +249,8 @@ size_t ArenaManager::Align(size_t nbytes, int alignment)
 
 inline void* ArenaManager::AllocatorFromAddress(void * addr)
 {
-	size_t iaddr = (size_t)addr;
-	if (iaddr < arenaBaseRequest) return nullptr;
-	unsigned int id = (iaddr >> arenaAddressShift) & ArenaMask;
-	//Log("LookupId", id, (size_t)arenaById[id]);
+	ArenaId id = ArenaVirtualMemory::ArenaNumber(addr);
+	if (id == -1) return nullptr;
 	return arenaById[id];
 }
 
@@ -262,7 +265,13 @@ void* ArenaManager::Peek()
 }
 int cnty = 0;
 int cntx = 0;
-void* ArenaManager::Allocate(size_t jsize)
+
+void  ArenaManager::RegisterForFinalization(Object* o, size_t size)
+{
+	Log("RegisterForFinalization", (size_t)o, (size_t)size);
+}
+
+void* ArenaManager::Allocate(size_t jsize, uint32_t flags)
 {
 	ArenaThread* arena = (ArenaThread*)GetArenaStack().Current();
 	if (arena == nullptr)
@@ -270,22 +279,28 @@ void* ArenaManager::Allocate(size_t jsize)
 		return nullptr;
 	}
 
-	size_t size = Align(jsize) + headerSize;
+	size_t size = Align(jsize);
 	void*ret = (arena)->Allocate(size);
-	if ((size_t)ret >= 0x40100010000)
+	memset(ret, 0, size);
+	if (flags & GC_ALLOC_FINALIZE)
 	{
-		//Log("trigger", (size_t)ret);
+		RegisterForFinalization((Object*)ret, size);
 	}
-	//	memset(ret, 0, size); it already is zero
-	return (void*)((char*)ret + headerSize);
+	return (void*)((char*)ret);
 }
 
 void* ArenaManager::Allocate(ArenaThread* arena, size_t jsize)
 {
-	size_t size = Align(jsize) + headerSize;
+	size_t size = Align(jsize);
 	void*ret = (arena)->Allocate(size);
+	
 	memset(ret, 0, size);
-	return (void*)((char*)ret + headerSize);
+	return (void*)((char*)ret);
+}
+
+namespace WKS
+{
+	extern int hcnt;
 }
 
 int ArenaManager::lcnt = 0;
@@ -318,9 +333,9 @@ void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr, size_t n3)
 
 	_itoa(lcnt++, pbuf, 10);
 	pbufI = strlen(pbuf); 
-	//pbuf[pbufI++] = ',';
-	//_itoa(WKS::hcnt, pbuf + pbufI, 10);
-	//pbufI = strlen(pbuf);
+	pbuf[pbufI++] = ',';
+	_itoa(WKS::hcnt, pbuf + pbufI, 10);
+	pbufI = strlen(pbuf);
 	pbuf[pbufI++] = '[';
 
 	_itoa(tid, pbuf + pbufI, 10);
@@ -405,14 +420,17 @@ void*  ArenaManager::ArenaMarshal(void*vdst, void*vsrc)
 {
 	if (vsrc == nullptr) return nullptr;
 #ifdef LOGGING
-	VerifyObject((Object*)vsrc);
+	//VerifyObject((Object*)vsrc);
 #endif
 	// src Allocator is not used
 	Arena* srcAllocator = (Arena*)AllocatorFromAddress(vsrc);
 	Arena* dstAllocator = (Arena*)AllocatorFromAddress(vdst);
 
+	if (dstAllocator != nullptr && (size_t)dstAllocator < 0x40000000000)
+	{
+		Log("allocator table error", (size_t)vdst);
+	}
 	// overrunning allocator... ignore.
-	if (srcAllocator != nullptr && dstAllocator != nullptr) return vsrc;
 	Object* src = (Object*)vsrc;
 
 	MethodTable* mT;
@@ -431,7 +449,7 @@ void*  ArenaManager::ArenaMarshal(void*vdst, void*vsrc)
 		(mT->HasComponentSize() ?
 			((size_t)(src->GetNumComponents() * mT->RawGetComponentSize())) : 0));
 
-	size_t size = ROUNDSIZE(cnt) + sizeof(Object) + headerSize;
+	size_t size = ROUNDSIZE(cnt);
 #ifdef LOGGING
 		Log("PreMarshall", (size_t)vsrc, (size_t)vdst, name, size);
 #endif
@@ -441,21 +459,20 @@ void*  ArenaManager::ArenaMarshal(void*vdst, void*vsrc)
 	if (dstAllocator == nullptr)
 	{
 		PushGC();
-		DWORD flags = ((bContainsPointers ? GC_ALLOC_CONTAINS_REF : 0) |
-			(bFinalize ? GC_ALLOC_FINALIZE : 0));
+		DWORD flags = ((mT->ContainsPointers() ? GC_ALLOC_CONTAINS_REF : 0)
+		//	| (mT->HasFinalizer() ? GC_ALLOC_FINALIZE : 0)
+			);
 		if (GCHeap::UseAllocationContexts())
 			p = GCHeap::GetGCHeap()->Alloc(GetThreadAllocContext(), size, flags);
 		else
 			p = GCHeap::GetGCHeap()->Alloc(size, flags);
 		Pop();
+		
 	}
 	else
 	{
 		p = dstAllocator->ThreadSafeAllocate(size);
 	}
-
-	*(size_t*)p = 0;
-	p = (void*)((size_t)p + headerSize);
 
 	//Log("Cloned object allocated ", (size_t)p, size);
 	// We know this is not a ByValueClass, but we must do our own reflection, so we start with copying the whole
@@ -464,59 +481,32 @@ void*  ArenaManager::ArenaMarshal(void*vdst, void*vsrc)
 	PTR_MethodTable pMT = src->GetMethodTable();
 	if (pMT->IsArray())
 	{
-		if (dstAllocator == nullptr)
-		{
-			Object* clone = (Object*)p;
-			GCPROTECT_BEGIN(clone);
-			GCPROTECT_BEGIN(src);
-			for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
-			CloneArray(p, src, pMT, sizeof(ArrayBase), size);
-			GCPROTECT_END();
-			GCPROTECT_END();
-		}
-		else {
-			Object* clone = (Object*)p;
-			GCPROTECT_BEGIN(clone);
-			GCPROTECT_BEGIN(src);
-			for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
-			CloneArray(p, src, pMT, sizeof(ArrayBase), size);
-			GCPROTECT_END();
-			GCPROTECT_END();
-		}
+		Object* clone = (Object*)p;
+		for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
+		CloneArray(p, src, pMT, sizeof(ArrayBase), size);
 	}
 	else
 	{
-		if (dstAllocator == nullptr)
-		{
-			Object* clone = (Object*)p;
-			GCPROTECT_BEGIN(clone);
-			GCPROTECT_BEGIN(src);
-			for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
-			size_t headerSize = (char*)(src->GetData()) - (char*)src;
-			CloneClass(p, src, pMT, (int)headerSize, size - headerSize);
-			GCPROTECT_END();
-			GCPROTECT_END();
-		}
-		else
-		{
-			Object* clone = (Object*)p;
-			GCPROTECT_BEGIN(clone);
-			GCPROTECT_BEGIN(src);
-			for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
-			size_t headerSize = (char*)(src->GetData()) - (char*)src;
-			CloneClass(p, src, pMT, (int)headerSize, size - headerSize);
-			GCPROTECT_END();
-			GCPROTECT_END();
-		}
+		Object* clone = (Object*)p;
+		for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
+		size_t classSize = (char*)(src->GetData()) - (char*)src;
+		CloneClass(p, src, pMT, (int)classSize, size-classSize);
 	}
 #ifdef LOGGING
 
 		Log("ArenaMarshal clone", (size_t)src, (size_t)p, name, (size_t)vdst);
-		VerifyObject((Object*)p);
+		if ((size_t)p < 0x40000000000)
+		{
+			RegisterAddress(p);
+		}
+		//VerifyObject((Object*)p);
+		CheckAll();
 #endif
 		return p;
 }
 
+
+__declspec(noinline)
 void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int ioffset, size_t size)
 {
 
@@ -553,11 +543,18 @@ void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int i
 		for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
 		{
 			OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + i);
-			if (pSrc != nullptr && (size_t)pSrc < arenaRangeEnd)
+			if (pSrc != nullptr && (size_t)pSrc < ArenaVirtualMemory::arenaRangeEnd)
 			{
 				void* clone = ArenaMarshal(dst, pSrc);
 				void** rdst = (void**)((char*)dst + i);
 				*rdst = clone;
+				if (!ISARENA(rdst))
+				{
+#ifdef _DEBUG
+					Thread::ObjectRefAssign(rdst);
+#endif
+					ErectWriteBarrier((Object**)rdst, (Object*)clone);
+				}
 				//Log("memwriteptr", (size_t)rdst, (size_t)clone);
 			}
 		}
@@ -576,6 +573,7 @@ void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int i
 	}
 }
 
+__declspec(noinline)
 void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int ioffset, size_t classSize)
 {
 #if DEBUG
@@ -606,6 +604,12 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 			if (f.IsStatic()) continue;
 			CorElementType type = f.GetFieldType();
 			DWORD offset = f.GetOffset() + ioffset;
+			if (pSrcFields[i].IsNotSerialized())
+			{
+				Log("IsNotSerialized", offset);
+				continue;
+			}
+
 			if (offset >= classSize)
 			{
 				offset = f.GetOffset() + ioffset;
@@ -675,6 +679,12 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 			if (f.IsStatic()) continue;
 			CorElementType type = f.GetFieldType();
 			DWORD offset = f.GetOffset() + ioffset;
+			if (pSrcFields[i].IsNotSerialized())
+			{
+				Log("IsNotSerialized", offset);
+				continue;
+			}
+
 			if (offset >= classSize)
 			{
 				continue;
@@ -715,6 +725,13 @@ void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int io
 					// safe state first.
 					void* clone = ArenaMarshal((void*)rdst, pSrc);
 					*rdst = clone;
+					if (!ISARENA(rdst))
+					{
+#ifdef _DEBUG
+						Thread::ObjectRefAssign(rdst);
+#endif
+						ErectWriteBarrier((Object**)rdst, (Object*)clone);
+					}
 					//Log("ArenaMarshal ptr", (size_t)rdst, (size_t)clone);
 				}
 			}
@@ -751,6 +768,12 @@ void ArenaManager::CloneClass1(void* dst, Object* src, PTR_MethodTable mt, int i
 			if (f.IsStatic()) continue;
 			CorElementType type = f.GetFieldType();
 			DWORD offset = f.GetOffset() + ioffset;
+			if (pSrcFields[i].IsNotSerialized())
+			{
+				Log("IsNotSerialized", offset);
+				continue;
+			}
+
 			if (offset >= classSize)
 			{
 				continue;
@@ -802,13 +825,20 @@ void ArenaManager::CloneClass1(void* dst, Object* src, PTR_MethodTable mt, int i
 
 		pCurrMT = pCurrMT->GetParentMethodTable();
 	}
-
 }
+
+
 
 #ifdef LOGGING
 void ArenaManager::VerifyObject(Object* o, MethodTable* pMT0)
 {
 	if (o == nullptr) return;
+	if (verifiedObjects.contains(o))
+	{
+		
+		return;
+	}
+	verifiedObjects.add(o);
 	MethodTable* pMT = pMT0;
 
 	if (pMT == nullptr)
@@ -821,9 +851,9 @@ void ArenaManager::VerifyObject(Object* o, MethodTable* pMT0)
 		o = (Object*)((Object*)o - 1);
 	}
 
-	DefineFullyQualifiedNameForClass();
-	char* name = (char*)GetFullyQualifiedNameForClass(pMT);
-	Log("Verify Object ", (size_t)o, (size_t)pMT, name, (size_t)(pMT->GetBaseSize()));
+	//DefineFullyQualifiedNameForClass();
+	//char* name = (char*)GetFullyQualifiedNameForClass(pMT);
+	//Log("Verify Object ", (size_t)o, (size_t)pMT, name, (size_t)(pMT->GetBaseSize()));
 
 	if (pMT->IsArray())
 	{
@@ -855,6 +885,11 @@ void ArenaManager::VerifyClass(Object* o, MethodTable* pMT)
 			if (f.IsStatic()) continue;
 			CorElementType type = f.GetFieldType();
 			DWORD offset = f.GetOffset() + ioffset;
+			if (pSrcFields[i].IsNotSerialized())
+			{
+				Log("IsNotSerialized", offset);
+				continue;
+			}
 			if (offset >= (DWORD)classSize)
 			{
 				continue;
@@ -886,6 +921,7 @@ void ArenaManager::VerifyClass(Object* o, MethodTable* pMT)
 			case ELEMENT_TYPE_OBJECT:
 			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
 			case ELEMENT_TYPE_ARRAY:        // all other arrays
+			case ELEMENT_TYPE_VAR:
 			{
 				Object* o2 = *(Object**)((char*)o + offset);
 				VerifyObject(o2);

@@ -472,24 +472,40 @@ ifdef _DEBUG
         ; In debug builds, this just contains jump to the debug version of the write barrier by default
         ;jmp     JIT_WriteBarrier_Debug
 endif
-		mov     rax, rdx
+		bt      rcx,42
+		jnc     targetNotArena1
+		bt      rdx,42
+		jnc      marshal1
+
+		; both arena - check if same buffer
+		mov     rax,rdx
 		xor     rax,rcx
-		mov     r10d,1
-		shl     r10,42
-		test    rax, r10
-		jnz     MixedArenaGC0
-;		bt      rax,42
-;		jc	    MixedArenaGC0
-		test   rcx, r10
-		jz   NotMixedArenaGC0
-;	    bt      rcx,42
-;		jnc      NotMixedArenaGC0
-		shr     rax,32
-		and      eax,3ffh
-		jne       MixedArenaGC0
-		 mov     [rcx], rdx
+		shr     rax,20
+		and     rax,3fffffh
+		je      nomarshalarena1
+
+		; check if buffers come from same arena
+		mov     rax,rdx
+		shr     rax,20
+		and     rax,3fffffh
+		mov     r8d,1
+		shl     r8,42
+		push	rbx
+		mov     bx,[r8+2*rax]
+		mov     rax,rcx
+		shr     rax,20
+		and     rax,3fffffh
+		cmp     bx,[r8+2*rax]
+		pop		rbx
+		jne     marshal1
+
+nomarshalarena1:
+		mov     [rcx],rdx
 		ret
-NotMixedArenaGC0:
+
+targetNotArena1:
+		bt		rdx,42
+		jc		marshal1
 
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
@@ -497,7 +513,7 @@ NotMixedArenaGC0:
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
         mov     [rcx], rdx
 
-        NOP_3_BYTE ; padding for alignment of constant 
+        nop; padding for alignment of constant 
 
         ; Can't compare a 64 bit immediate, so we have to move them into a
         ; register.  Values of these immediates will be patched at runtime.
@@ -532,7 +548,8 @@ NotMixedArenaGC0:
         mov     byte ptr [rcx + rax], 0FFh
         ret
 
-MixedArenaGC0:
+		marshal1:
+
 		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
@@ -557,6 +574,21 @@ MixedArenaGC0:
         REPRET
     ; make sure this guy is bigger than any of the other guys
     align 16
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
         nop
 LEAF_END_MARKED JIT_WriteBarrier, _TEXT
 

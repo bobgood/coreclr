@@ -58,8 +58,8 @@ extern JIT_GetSharedNonGCStaticBase_Helper:proc
 extern JIT_GetSharedGCStaticBase_Helper:proc
 
 extern JIT_InternalThrow:proc
-ArenaMarshall equ ?ArenaMarshall@ArenaManager@@SAPEAXPEAX0@Z
-extern ArenaMarshall:proc
+ArenaMarshal equ ?ArenaMarshal@ArenaManager@@SAPEAXPEAX0@Z
+extern ArenaMarshal:proc
 
 ; These should be in AsmConstants.inc, but I could not figure out how...
 ArenaAllocator_m_nextBlock_Offset          EQU 0
@@ -177,7 +177,7 @@ endif
 
         END_PROLOGUE
     
-        mov                 rax, ArenaMarshall
+        mov                 rax, ArenaMarshal
 		call                rax
 
         add                 rsp, 20h

@@ -1,6 +1,6 @@
 #pragma once
 
-
+#include "../common.h"
 #include <assert.h>
 #include <stdio.h>
 
@@ -19,14 +19,18 @@ struct ArenaVirtualMemoryState
 
 class ArenaVirtualMemory
 {
+public:
 	static const int addressBits = 43;
 	// The base address of arenas (to distinguish arenas from other memory)
 	static const size_t arenaBaseRequest = 1ULL << (addressBits - 1); // half of virtual address space reserved for arenas
+
 	static const size_t arenaBaseSize = (size_t)256 * 1024 * 1024 * 1024;  // 256GB max for arenas for now...
 	static const size_t arenaRangeEnd = arenaBaseRequest + arenaBaseSize;
+
 	static const size_t bufferReserveSize = 1024 * 1024;
 	static const size_t bufferPadding = 16 * 1024;
 	static const size_t bufferSize = bufferReserveSize - bufferPadding;
+private:
 	static const size_t maxBuffers = arenaBaseSize / bufferReserveSize;
 	static const ArenaId available = (ArenaId)-1;
 	static const ArenaId empty = (ArenaId)-2;
@@ -40,7 +44,7 @@ public:
 	{
 		size_t allocNeeded = maxBuffers * sizeof(ArenaId) + bufferPadding * 2;
 		size_t allocSize = (allocNeeded / bufferReserveSize + 1)*bufferReserveSize;
-		auto virtualBase = (size_t)VirtualAlloc((LPVOID)arenaBaseRequest, arenaBaseSize, MEM_RESERVE, PAGE_NOACCESS);
+		auto virtualBase = (size_t)ClrVirtualAlloc((LPVOID)arenaBaseRequest, arenaBaseRequest/*arenaBaseSize*/, MEM_RESERVE, PAGE_NOACCESS);
 		if ((size_t)virtualBase != arenaBaseRequest)
 		{
 			printf("failed to initialize virtual memory for arenas");
@@ -48,7 +52,7 @@ public:
 		}
 
 
-		LPVOID addr = VirtualAlloc((LPVOID)virtualBase, allocSize - bufferPadding, MEM_COMMIT, PAGE_READWRITE);
+		LPVOID addr = ClrVirtualAlloc((LPVOID)virtualBase, allocSize - bufferPadding, MEM_COMMIT, PAGE_READWRITE);
 		if (addr == 0)
 		{
 			int err = GetLastError();
@@ -97,10 +101,11 @@ public:
 		return ((size_t)addr >= arenaBaseRequest);
 	}
 
-	static int ArenaNumber(void*addr)
+	static ArenaId ArenaNumber(void*addr)
 	{
 		if (!IsArena(addr)) return -1;
-		return BufferAddressToId(addr);
+		BufferId bid =  BufferAddressToId(addr);
+		return ARENALOOKUP(bid);
 	}
 
 	static void FreeBuffer(void* addr, size_t len = bufferSize)
@@ -115,7 +120,7 @@ public:
 			}
 		}
 		else {
-			VirtualFree(addr, len, MEM_DECOMMIT);
+			ClrVirtualFree(addr, len, MEM_DECOMMIT);
 			BufferId first = BufferAddressToId(addr);
 			int slots = Slots(len);
 			for (BufferId i = first; i < first + slots; i++)
@@ -125,6 +130,7 @@ public:
 		}
 	}
 
+	__declspec(noinline)
 	static void* GetBuffer(ArenaId arenaId, size_t len = bufferSize)
 	{
 		assert(arenaId != empty && arenaId != available);
@@ -161,16 +167,22 @@ public:
 		{
 			bufferId = s.m_nextSlot;
 			s.m_nextSlot += Slots(len);
+			if (s.m_nextSlot > maxBuffers)
+			{
+				MemoryException();
+			}
 		}
 		else
 		{
 			bufferId = backupId;
 		}
-		ARENALOOKUP(bufferId) = arenaId;
+
+		for (int i = bufferId; i < bufferId + Slots(len); i++)
+		ARENALOOKUP(i) = arenaId;
 		ret = BufferIdToAddress(bufferId);
 		SpinUnlock(s.m_lock);
 
-		LPVOID addr = VirtualAlloc(ret, len, MEM_COMMIT, PAGE_READWRITE);
+		LPVOID addr = ClrVirtualAlloc(ret, len, MEM_COMMIT, PAGE_READWRITE);
 
 		if (addr != ret)
 		{
@@ -184,7 +196,7 @@ public:
 private:
 	static void MemoryException()
 	{
-		//RealCOMPlusThrowWin32(ERROR_NOT_ENOUGH_MEMORY);
-		assert(false);
+		EEPOLICY_HANDLE_FATAL_ERROR(COR_E_OUTOFMEMORY);
+
 	}
 };

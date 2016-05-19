@@ -394,6 +394,11 @@ void ProfScanRootsHelper(Object** ppObject, ScanContext *pSC, uint32_t dwFlags)
     {
         uint8_t *o = (uint8_t*)pObj;
         gc_heap* hp = gc_heap::heap_of (o);
+		if (hp == nullptr)
+		{
+			// BOB
+			return;
+		}
 
         if ((o < hp->gc_low) || (o >= hp->gc_high))
         {

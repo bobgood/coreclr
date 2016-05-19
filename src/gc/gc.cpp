@@ -10,7 +10,7 @@
 // file:../../doc/BookOfTheRuntime/GC/GCDesign.doc
 // 
 // This file includes both the code for GC and the allocator. The most common
-// case for a GC to be triggered is from the allocator code. See
+// case for a GC to be triggered is from the allocator code. Senamespace WKSe
 // code:#try_allocate_more_space where it calls GarbageCollectGeneration.
 // 
 // Entry points for the allocate is GCHeap::Alloc* which are called by the
@@ -19,10 +19,19 @@
 
 #include "gcpriv.h"
 
+HANDLE hFile;
 __declspec(noinline)
 void Stop()
 {
 	printf("assert\n");
+	DWORD written;
+	WriteFile(hFile, "assert\n", (DWORD)strlen("assert\n"), &written, 0);
+	FlushFileBuffers(hFile);
+
+
+#ifndef DACCESS_COMPILE
+	GCToOSInterface::DebugBreak();
+#endif
 }
 #undef assert
 #define assert(x) if (!(x)) {Stop();}
@@ -449,15 +458,37 @@ void log_va_msg(const char *fmt, va_list args)
     gc_log_lock.Leave();
 }
 
+int hcnt = 0;
 void GCLog (const char *fmt, ... )
 {
-    if (gc_log_on && (gc_log != NULL))
-    {
-        va_list     args;
-        va_start(args, fmt);
-        log_va_msg (fmt, args);
-        va_end(args);
-    }
+	if (hFile == (HANDLE)0xffffffff || hFile == 0)
+	{
+		//hFile = GetStdHandle(STD_OUTPUT_HANDLE);
+		hFile = ::CreateFileA("log.txt",                // name of the write
+			GENERIC_WRITE,          // open for writing
+			FILE_SHARE_READ,                      // do not share
+			NULL,                   // default security
+			CREATE_ALWAYS,             // create new file only
+			FILE_ATTRIBUTE_NORMAL,  // normal file
+			NULL);                  // no attr. template
+	}
+	char buffer[1024];
+	_itoa(hcnt++, buffer, 10);
+	size_t I = strlen(buffer);
+	buffer[I++] = ':';
+	buffer[I++] = ' ';
+	buffer[I++] = 'G';
+	buffer[I++] = 'C';
+	buffer[I++] = ' ';
+	va_list     args;
+    va_start(args, fmt);
+	vsprintf_s(buffer+I, 1000, fmt, args);
+	I = strlen(buffer);
+	buffer[I++] = '\n';
+    va_end(args);	
+	buffer[I] = 0;
+	DWORD written;
+	WriteFile(hFile, buffer, (DWORD)I, &written, 0);
 }
 #endif // TRACE_GC && !DACCESS_COMPILE
 
@@ -16761,6 +16792,11 @@ inline // This causes link errors if global optimization is off
 #endif //!_DEBUG && !__GNUC__
 gc_heap* gc_heap::heap_of (uint8_t* o)
 {
+	if (ISARENA(o))
+	{
+		// BOB
+		return nullptr;
+	}
 #ifdef MULTIPLE_HEAPS
     if (o == 0)
         return g_heaps [0];
@@ -16781,6 +16817,11 @@ gc_heap* gc_heap::heap_of (uint8_t* o)
 inline
 gc_heap* gc_heap::heap_of_gc (uint8_t* o)
 {
+	if (ISARENA(o))
+	{
+		// BOB
+		return nullptr;
+	}
 #ifdef MULTIPLE_HEAPS
     if (o == 0)
         return g_heaps [0];
@@ -16998,7 +17039,12 @@ BOOL gc_heap::gc_mark (uint8_t* o, uint8_t* low, uint8_t* high)
     {
         //find the heap
         gc_heap* hp = heap_of_gc (o);
-        assert (hp);
+		if (hp == nullptr)
+		{
+			// BOB
+			return false;
+		}
+
         if ((o >= hp->gc_low) && (o < hp->gc_high))
             marked = gc_mark1 (o);
     }
@@ -17055,7 +17101,12 @@ BOOL gc_heap::background_mark (uint8_t* o, uint8_t* low, uint8_t* high)
     {
         //find the heap
         gc_heap* hp = heap_of (o);
-        assert (hp);
+		if (hp == nullptr)
+		{
+			// BOB
+			return false;
+		}
+        
         if ((o >= hp->background_saved_lowest_address) && (o < hp->background_saved_highest_address))
             marked = background_mark1 (o);
     }
@@ -17927,6 +17978,11 @@ gc_heap::ha_mark_object_simple (uint8_t** po THREAD_NUMBER_DCL)
             !((ref >= current_obj) && (ref < (current_obj + current_obj_size))))
         {
             gc_heap* hp = gc_heap::heap_of (ref);
+			if (hp == nullptr)
+			{
+				// BOB
+				return;
+			}
             current_obj = hp->find_object (ref, hp->lowest_address);
             current_obj_size = size (current_obj);
 
@@ -17988,8 +18044,13 @@ uint8_t* gc_heap::mark_object (uint8_t* o THREAD_NUMBER_DCL)
     {
         //find the heap
         gc_heap* hp = heap_of (o);
-        assert (hp);
-        if ((o >= hp->gc_low) && (o < hp->gc_high))
+		if (hp == nullptr)
+		{
+			// BOB
+			return o;
+		}
+
+		if ((o >= hp->gc_low) && (o < hp->gc_high))
             mark_object_simple (&o THREAD_NUMBER_ARG);
     }
 #endif //MULTIPLE_HEAPS
@@ -18254,6 +18315,12 @@ void gc_heap::background_verify_mark (Object*& object, ScanContext* sc, uint32_t
     uint8_t* o = (uint8_t*)object;
 
     gc_heap* hp = gc_heap::heap_of (o);
+	if (hp == nullptr)
+	{
+		// BOB
+		return;
+	}
+
 #ifdef INTERIOR_POINTERS
     if (flags & GC_CALL_INTERIOR)
     {
@@ -18293,6 +18360,11 @@ void gc_heap::background_promote (Object** ppObject, ScanContext* sc, uint32_t f
     HEAP_FROM_THREAD;
 
     gc_heap* hp = gc_heap::heap_of (o);
+	if (hp == nullptr)
+	{
+		// BOB
+		return;
+	}
 
     if ((o < hp->background_saved_lowest_address) || (o >= hp->background_saved_highest_address))
     {
@@ -23238,6 +23310,12 @@ void gc_heap::relocate_address (uint8_t** pold_address THREAD_NUMBER_DCL)
         if (old_address == 0)
             return;
         gc_heap* hp = heap_of (old_address);
+		if (hp == nullptr)
+		{
+			// BOB
+			return;
+		}
+
         if ((hp == this) ||
             !((old_address >= hp->gc_low) && (old_address < hp->gc_high)))
             return;
@@ -23359,7 +23437,13 @@ gc_heap::check_demotion_helper (uint8_t** pval, uint8_t* parent_obj)
     {
         dprintf (4, ("Demotion active, computing heap_of object"));
         gc_heap* hp = heap_of (*pval);
-        if ((*pval < hp->demotion_high) &&
+		if (hp == nullptr)
+		{
+			// BOB
+			return;
+		}
+
+		if ((*pval < hp->demotion_high) &&
             (*pval >= hp->demotion_low))
         {
             dprintf(3, ("setting card %Ix:%Ix",
@@ -23429,7 +23513,13 @@ void gc_heap::reloc_ref_in_shortened_obj (uint8_t** address_to_set_card, uint8_t
     else if (settings.demotion)
     {
         gc_heap* hp = heap_of (relocated_addr);
-        if ((relocated_addr < hp->demotion_high) &&
+		if (hp == nullptr)
+		{
+			// BOB
+			return;
+		}
+
+		if ((relocated_addr < hp->demotion_high) &&
             (relocated_addr >= hp->demotion_low))
         {
             dprintf (3, ("%Ix on h%d, set card for location %Ix(%Ix)",
@@ -26471,6 +26561,11 @@ void gc_heap::background_promote_callback (Object** ppObject, ScanContext* sc,
     HEAP_FROM_THREAD;
 
     gc_heap* hp = gc_heap::heap_of (o);
+	if (hp == nullptr)
+	{
+		// BOB
+		return;
+	}
 
     if ((o < hp->background_saved_lowest_address) || (o >= hp->background_saved_highest_address))
     {
@@ -27509,7 +27604,8 @@ gc_heap::keep_card_live (uint8_t* o, size_t& n_gen,
     else if (o)
     {
         gc_heap* hp = heap_of (o);
-        if (hp != this)
+		// BOB
+		if (hp != this && hp!=nullptr)
         {
             if ((hp->gc_low <= o) &&
                 (hp->gc_high > o))
@@ -27539,7 +27635,8 @@ gc_heap::mark_through_cards_helper (uint8_t** poo, size_t& n_gen,
     else if (*poo)
     {
         gc_heap* hp = heap_of_gc (*poo);
-        if (hp != this)
+		// BOB
+		if (hp && hp != this)
         {
             if ((hp->gc_low <= *poo) &&
                 (hp->gc_high > *poo))
@@ -33648,6 +33745,8 @@ BOOL GCHeap::IsPromoted(Object* object)
     else
     {
         gc_heap* hp = gc_heap::heap_of (o);
+		// BOB
+		if (hp == nullptr) return false;
         return (!((o < hp->gc_high) && (o >= hp->gc_low))
                 || hp->is_mark_set (o));
     }
@@ -33670,6 +33769,12 @@ size_t GCHeap::GetPromotedBytes(int heap_index)
 unsigned int GCHeap::WhichGeneration (Object* object)
 {
     gc_heap* hp = gc_heap::heap_of ((uint8_t*)object);
+	if (hp == nullptr)
+	{
+		// BOB
+		return 3;
+	}
+
     unsigned int g = hp->object_gennum ((uint8_t*)object);
     dprintf (3, ("%Ix is in gen %d", (size_t)object, g));
     return g;
@@ -33679,6 +33784,8 @@ BOOL    GCHeap::IsEphemeral (Object* object)
 {
     uint8_t* o = (uint8_t*)object;
     gc_heap* hp = gc_heap::heap_of (o);
+	// BOB
+	if (hp == nullptr) return false;
     return hp->ephemeral_pointer_p (o);
 }
 
@@ -33783,6 +33890,12 @@ void GCHeap::Promote(Object** ppObject, ScanContext* sc, uint32_t flags)
 
     gc_heap* hp = gc_heap::heap_of (o);
 
+	if (hp == nullptr)
+	{
+		// BOB
+		return;
+	}
+
     dprintf (3, ("Promote %Ix", (size_t)o));
 
 #ifdef INTERIOR_POINTERS
@@ -33863,6 +33976,11 @@ void GCHeap::Relocate (Object** ppObject, ScanContext* sc,
         return;
 
     gc_heap* hp = gc_heap::heap_of (object);
+	if (hp == nullptr)
+	{
+		// BOB
+		return;
+	}
 
 #ifdef _DEBUG
     if (!(flags & GC_CALL_INTERIOR))
@@ -34671,6 +34789,12 @@ GCHeap::GetContainingObject (void *pInteriorPtr)
     uint8_t *o = (uint8_t*)pInteriorPtr;
 
     gc_heap* hp = gc_heap::heap_of (o);
+	if (hp == nullptr)
+	{
+		// BOB
+		return nullptr;
+	}
+
     if (o >= hp->lowest_address && o < hp->highest_address)
     {
         o = hp->find_object (o, hp->gc_low);
@@ -35629,10 +35753,13 @@ int GCHeap::EndNoGCRegion()
 
 void GCHeap::PublishObject (uint8_t* Obj)
 {
+	if (ISARENA(Obj)) return;
 #ifdef BACKGROUND_GC
-	if ((size_t)Obj >= ArenaManager::arenaBaseRequest) return;
+	if ((size_t)Obj >= ArenaVirtualMemory::arenaBaseRequest) return;
     gc_heap* hp = gc_heap::heap_of (Obj);
-    hp->bgc_alloc_lock->loh_alloc_done (Obj);
+	// BOB
+	if (hp!=nullptr) 
+		hp->bgc_alloc_lock->loh_alloc_done (Obj);
 #endif //BACKGROUND_GC
 }
 
@@ -35866,6 +35993,12 @@ bool GCHeap::RegisterForFinalization (int gen, Object* obj)
     else
     {
         gc_heap* hp = gc_heap::heap_of ((uint8_t*)obj);
+		if (hp == nullptr)
+		{
+			// BOB
+			return false;
+		}
+
         return hp->finalize_queue->RegisterForFinalization (gen, obj);
     }
 }

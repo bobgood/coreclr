@@ -99,7 +99,7 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 		(bFinalize ? GC_ALLOC_FINALIZE : 0));
 
 	Object *retVal = NULL;
-	retVal = (Object *)::ArenaManager::Allocate(size);
+	retVal = (Object *)::ArenaManager::Allocate(size,flags);
 	if (retVal != nullptr) 
 	{
 		return retVal;
@@ -113,7 +113,7 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	else
 		retVal = GCHeap::GetGCHeap()->Alloc(size, flags);
 	END_INTERIOR_STACK_PROBE;
-
+	::ArenaManager::RegisterAddress(retVal);
 	return retVal;
 }
 
@@ -150,6 +150,7 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
 		retVal = GCHeap::GetGCHeap()->AllocAlign8(size, flags);
 
 	END_INTERIOR_STACK_PROBE;
+	::ArenaManager::RegisterAddress(retVal);
 	::ArenaManager::Log("AllocateObject GC2", retVal, size);
 	return retVal;
 }
@@ -184,7 +185,7 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 		(bFinalize ? GC_ALLOC_FINALIZE : 0));
 
 	Object *retVal = NULL;
-	retVal = (Object *)::ArenaManager::Allocate(size);
+	retVal = (Object *)::ArenaManager::Allocate(size,flags);
 	if (retVal != nullptr)
 	{
 
@@ -199,7 +200,7 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	retVal = GCHeap::GetGCHeap()->AllocLHeap(size, flags);
 	END_INTERIOR_STACK_PROBE;
 	::ArenaManager::Log("AllocateObject GC3", (size_t)retVal, size);
-	 
+	::ArenaManager::RegisterAddress(retVal);
 	return retVal;
 }
 
@@ -452,8 +453,7 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	// Initialize Object
 	orArray->m_NumComponents = cElements;
 
-	if (bAllocateInLargeHeap ||
-		(totalSize >= LARGE_OBJECT_SIZE && !ISARENA(orArray)))
+	if (bAllocateInLargeHeap || totalSize >= LARGE_OBJECT_SIZE) 
 	{
 		GCHeap::GetGCHeap()->PublishObject((BYTE*)orArray);
 	}
@@ -630,6 +630,7 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 	if (bAllocateInLargeHeap)
 	{
 		orObject = (ArrayBase*)AllocLHeap(totalSize, FALSE, FALSE);
+		
 	}
 	else
 	{
@@ -665,11 +666,13 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 			}
 			_ASSERTE(((size_t)orObject % sizeof(double)) == 0);
 			orDummyObject->SetMethodTable(g_pObjectClass);
+			
+
 		}
 		else
 		{
 			orObject = (ArrayBase*)Alloc(totalSize, FALSE, FALSE);
-			bPublish = (totalSize >= LARGE_OBJECT_SIZE && !ISARENA(orObject));
+			bPublish = (totalSize >= LARGE_OBJECT_SIZE);
 		}
 	}
 
@@ -886,7 +889,7 @@ STRINGREF SlowAllocateString(DWORD cchStringLength)
 	orObject->SetMethodTable(g_pStringClass);
 	orObject->SetStringLength(cchStringLength);
 
-	if (ObjectSize >= LARGE_OBJECT_SIZE && !ISARENA(orObject))
+	if (ObjectSize >= LARGE_OBJECT_SIZE) 
 	{
 		GCHeap::GetGCHeap()->PublishObject((BYTE*)orObject);
 	}
@@ -1027,7 +1030,7 @@ OBJECTREF AllocateObject(MethodTable *pMT
 			// Object is zero-init already
 		_ASSERTE(orObject->HasEmptySyncBlockInfo());
 
-		if ((baseSize >= LARGE_OBJECT_SIZE && !ISARENA(orObject)))
+		if (baseSize >= LARGE_OBJECT_SIZE)
 		{
 			orObject->SetMethodTableForLargeObject(pMT);
 			GCHeap::GetGCHeap()->PublishObject((BYTE*)orObject);

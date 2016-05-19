@@ -1,6 +1,7 @@
 #pragma once
 
 #include <assert.h>
+#include "..\..\vm\eepolicy.h"
 
 class ArenaThread
 {
@@ -48,8 +49,6 @@ class Arena
 
 	friend class ArenaThread;
 private:
-	static const size_t BufferSize = 8 * 1024 * 1024;
-	static const size_t MaxPerArena = 1ULL << 32;
 	static const size_t ThreadSafeBufferPreallocate = 8 * 1024;
 	// within the fixed address space of a single arena are individual buffers
 	// which are assigned to different threads, with one reserved for thread shared access.
@@ -59,15 +58,14 @@ private:
 	// Total number of buffers allowed per arena
 	int m_bufferCnt;
 
-	// Number of buffers users per arena
+	// Number of buffers uses per arena
 	int m_bufferNext;
 
-	// Address for next buffer when it is allocated
-	volatile size_t m_nextAddress;
 	LONG m_lock0;
 	LONG m_lock1;
 	LONG m_lock2;
 	LONG m_lock3;
+	ArenaId m_id;
 
 	// normal buffer size used (larger is allowed for overflow allocations)
 	size_t m_bufferSize;
@@ -82,10 +80,10 @@ private:
 	ArenaThread m_sharedArenaThread;
 
 public:
-	static Arena* MakeArena(size_t requestAddress, size_t bufferSize = BufferSize, size_t maxPerArena = MaxPerArena)
+	static Arena* MakeArena(ArenaId id, size_t requestAddress, size_t bufferSize, size_t maxPerArena)
 	{
 		LPVOID addr = ClrVirtualAlloc((LPVOID)requestAddress, bufferSize, MEM_COMMIT, PAGE_READWRITE);
-		return new (addr) Arena(requestAddress, bufferSize, maxPerArena);
+		return new (addr) Arena(id, requestAddress, bufferSize, maxPerArena);
 	}
 
 	template<typename T>
@@ -124,12 +122,12 @@ public:
 	}
 
 	// c/dtor
-	Arena(size_t addr, size_t bufferSize = BufferSize, size_t maxPerArena = MaxPerArena)
+	Arena(ArenaId id, size_t addr, size_t bufferSize, size_t maxPerArena)
 	{
 		assert((size_t)this == addr); // , "Arena should only be constructed through MakeArena");
 		new (&m_arenaThread) ArenaThread(this, (char*)this + sizeof(Arena), (char*)this + bufferSize, bufferSize);
-			m_nextAddress = (size_t)this + bufferSize;
-		m_bufferCnt = MaxPerArena / BufferSize;
+
+		m_bufferCnt = (int)( maxPerArena / bufferSize);
 		m_buffers = (Buffer*)m_arenaThread.Allocate(m_bufferCnt*sizeof(Buffer*));
 		m_buffers[0].m_addr = (char*)this;
 		m_buffers[0].m_len = bufferSize;
@@ -141,6 +139,7 @@ public:
 		m_lock1 = 0;
 		m_lock2 = 0;
 		m_lock3 = 0;
+		m_id = id;
 
 		char* threadSafeBuffer = (char*)m_arenaThread.Allocate(ThreadSafeBufferPreallocate);
 		new (&m_sharedArenaThread) ArenaThread(this, threadSafeBuffer, threadSafeBuffer + ThreadSafeBufferPreallocate, bufferSize);
@@ -148,24 +147,18 @@ public:
 
 	char* VAlloc(size_t len)
 	{
-		size_t was;
-		for (;;)
+		if (m_bufferNext >= m_bufferCnt)
 		{
-			was = m_nextAddress;
-			if (InterlockedCompareExchange(&m_nextAddress, (size_t)(was + len), was) == was) break;
-		}
-		LPVOID addr = ClrVirtualAlloc((LPVOID)was, len, MEM_COMMIT, PAGE_READWRITE);
-		if (was != (size_t)addr)
-		{
-			//::ArenaManager::Log("*VirtualAllocError", (size_t)addr, was);
+			EEPOLICY_HANDLE_FATAL_ERROR(COR_E_OUTOFMEMORY);
 		}
 
+		void* addr = ArenaManager::GetBuffer(m_id, len);
 		SpinLock(m_lock0);
 		m_buffers[m_bufferNext].m_addr = (char*)addr;
 		m_buffers[m_bufferNext++].m_len = len;
 		assert(m_nextAddress < m_arenaEnd);
 		SpinUnlock(m_lock0);
-		//::ArenaManager::Log("VirtualAlloc", (size_t)addr, len);		
+		::ArenaManager::Log("VirtualAlloc", (size_t)addr, len,nullptr,m_id);		
 		return (char*)addr;
 	}
 
@@ -211,18 +204,19 @@ void* ArenaThread::Allocate(size_t size, bool report)
 		{
 			char* ret = m_next;
 			m_next = after;
-		//	if (report) ::ArenaManager::Log("Allocate", (size_t)ret, size);
+		
+			memset(ret, 0, size);
 			return ret;
 		}
 		else if (size < m_bufferSize)
 		{
 			m_arena->GetNewBuffer(this);
-			//::ArenaManager::Log("NewBuffer in arenaThread", (size_t)m_next);
+			
 		}
 		else
 		{
 			char* ret = m_arena->Overflow(size);
-			//if (report) ::ArenaManager::Log("overflow Allocate", (size_t)ret, size);
+			memset(ret, 0, size);
 			return ret;
 		}
 	}

@@ -52,28 +52,43 @@ NESTED_ENTRY JIT_WriteBarrier_PreGrow32, _TEXT
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
-		 mov     rax, rdx
+		bt      rcx,42
+		jnc     targetNotArena2
+		bt      rdx,42
+		jnc      marshal2
+
+		; both arena - check if same buffer
+		mov     rax,rdx
 		xor     rax,rcx
-		mov   r10,1
-		shl   r10,42
-		test   rax, r10
-		jnz    MixedArenaGC
-;		bt      rax,42
-;		jc	    MixedArenaGC
-		test   rcx, r10
-		jz   NotMixedArenaGC
-;	    bt      rcx,42
-;		jnc      NotMixedArenaGC
-		shr     rax,32
-		and      eax,3ffh
-		jne      MixedArenaGC
-		; valid arena write barrier
-		mov     [rcx], rdx
+		shr     rax,20
+		and     rax,3fffffh
+		je      nomarshalarena2
+
+		; check if buffers come from same arena
+		mov     rax,rdx
+		shr     rax,20
+		and     rax,3fffffh
+		mov     r8d,1
+		shl     r8,42
+		push	rbx
+		mov     bx,[r8+2*rax]
+		mov     rax,rcx
+		shr     rax,20
+		and     rax,3fffffh
+		cmp     bx,[r8+2*rax]
+		pop		rbx
+		jne     marshal2
+
+nomarshalarena2:
+		mov     [rcx],rdx
 		ret
-NotMixedArenaGC:
+
+targetNotArena2:  
+		bt		rdx,42
+		jc		marshal2
         mov     [rcx], rdx
 
-        ;NOP_3_BYTE ; padding for alignment of constant
+        nop ; padding for alignment of constant
 
 		
 PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_Lower
@@ -92,7 +107,7 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
     UpdateCardTable:
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
-	MixedArenaGC:
+	marshal2:
 		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
@@ -121,28 +136,48 @@ NESTED_ENTRY JIT_WriteBarrier_PreGrow64, _TEXT
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
-		mov     rax, rdx
+		bt      rcx,42
+		jnc     targetNotArena3
+		bt      rdx,42
+		jnc      marshal3
+
+		; both arena - check if same buffer
+		mov     rax,rdx
 		xor     rax,rcx
-		mov     r10, 1
-		shl     r10,42
-		test    rax, r10
-		jnz     MixedArenaGC2
-;		bt      rax,42
-;		jc	    MixedArenaGC2
-		test    rcx, r10
-		jz      NotMixedArenaGC2
-;	    bt      rcx,42
-;		jnc      NotMixedArenaGC2
-		shr     rax,32
-		and      eax,3ffh
-		jne      MixedArenaGC2
-		; valid arena write barrier
-		mov     [rcx], rdx
+		shr     rax,20
+		and     rax,3fffffh
+		je      nomarshalarena3
+
+		; check if buffers come from same arena
+		mov     rax,rdx
+		shr     rax,20
+		and     rax,3fffffh
+		mov     r8d,1
+		shl     r8,42
+		push	rbx
+		mov     bx,[r8+2*rax]
+		mov     rax,rcx
+		shr     rax,20
+		and     rax,3fffffh
+		cmp     bx,[r8+2*rax]
+		pop		rbx
+		jne     marshal3
+
+nomarshalarena3:
+		mov     [rcx],rdx
 		ret
- 
-NotMixedArenaGC2:
+marshal3:
+        jmp     lmarshal3
+
+targetNotArena3:  
+		bt		rdx,42
+		jc		marshal3
         mov     [rcx], rdx
-         NOP; padding for alignment of constant
+		
+		nop
+		nop
+		nop
+		nop
 
         ; Can't compare a 64 bit immediate, so we have to move it into a
         ; register.  Value of this immediate will be patched at runtime.
@@ -167,7 +202,7 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow64_Patch_Label_CardTable
     UpdateCardTable:
         mov     byte ptr [rcx + rax], 0FFh
         ret
-MixedArenaGC2:
+lmarshal3:
 		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
@@ -193,31 +228,47 @@ NESTED_END_MARKED JIT_WriteBarrier_PreGrow64, _TEXT
 ; See comments for JIT_WriteBarrier_PreGrow (above).
 NESTED_ENTRY JIT_WriteBarrier_PostGrow64, _TEXT
         align 8
-		 mov     rax, rdx
+		bt      rcx,42
+		jnc     targetNotArena4
+		bt      rdx,42
+		jnc      marshal4
+
+		; both arena - check if same buffer
+		mov     rax,rdx
 		xor     rax,rcx
-		mov   r10,1
-		shl   r10,42
-		test   rax, r10
-		jnz    MixedArenaGC3
-;		bt      rax,42
-;		jc	    MixedArenaGC3
-		test   rcx, r10
-		jz   NotMixedArenaGC3
-;	    bt      rcx,42
-;		jnc      NotMixedArenaGC3
-		shr     rax,32
-		and      eax,3ffh
-		jne      MixedArenaGC3
-		; valid arena write barrier
-		mov     [rcx], rdx
+		shr     rax,20
+		and     rax,3fffffh
+		je      nomarshalarena4
+
+		; check if buffers come from same arena
+
+		mov     rax,rdx
+		shr     rax,20
+		and     rax,3fffffh
+		mov     r8d,1
+		shl     r8,42
+		push	rbx
+		mov     bx,[r8+2*rax]
+		mov     rax,rcx
+		shr     rax,20
+		and     rax,3fffffh
+		cmp     bx,[r8+2*rax]
+		pop		rbx
+		jne     marshal4
+nomarshalarena4:
+		mov     [rcx],rdx
 		ret
-NotMixedArenaGC3:
+
+targetNotArena4:  
+		bt		rdx,42
+		jc		marshal4
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
         mov     [rcx], rdx
 
+		NOP ; padding for alignment of constant
 		NOP ; padding for alignment of constant
 
         ; Can't compare a 64 bit immediate, so we have to move them into a
@@ -255,7 +306,7 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow64_Patch_Label_CardTable
         mov     byte ptr [rcx + rax], 0FFh
         ret
 
-MixedArenaGC3:
+marshal4:
 		mov rbx,rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
@@ -279,32 +330,46 @@ NESTED_END_MARKED JIT_WriteBarrier_PostGrow64, _TEXT
 
 NESTED_ENTRY JIT_WriteBarrier_PostGrow32, _TEXT
         align 4
-		 mov     rax, rdx
+		bt      rcx,42
+		jnc     targetNotArena5
+		bt      rdx,42
+		jnc      marshal5
+
+		; both arena - check if same buffer
+		mov     rax,rdx
 		xor     rax,rcx
-				mov   r10,1
-		shl   r10,42
-		test   rax, r10
-		jnz    MixedArenaGC4
-;		bt      rax,42
-;		jc	    MixedArenaGC4
-		test   rcx, r10
-		jz   NotMixedArenaGC4
-;	    bt      rcx,42
-;		jnc      NotMixedArenaGC4
-		shr     rax,32
-		and      eax,3ffh
-		jne      MixedArenaGC4
-		; valid arena write barrier
-		mov     [rcx], rdx
+		shr     rax,20
+		and     rax,3fffffh
+		je      nomarshalarena5
+
+		; check if buffers come from same arena
+		mov     rax,rdx
+		shr     rax,20
+		and     rax,3fffffh
+		mov     r8d,1
+		shl     r8,42
+		push	rbx
+		mov     bx,[r8+2*rax]
+		mov     rax,rcx
+		shr     rax,20
+		and     rax,3fffffh
+		cmp     bx,[r8+2*rax]
+		pop		rbx
+		jne     marshal5
+nomarshalarena5:
+		mov     [rcx],rdx
 		ret
-NotMixedArenaGC4:
+
+targetNotArena5:  
+		bt		rdx,42
+		jc		marshal5
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
         mov     [rcx], rdx
 
-        ;NOP_3_BYTE ; padding for alignment of constant
+        nop ; padding for alignment of constant
 
         ; Check the lower and upper ephemeral region bounds
 
@@ -332,7 +397,7 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow32_PatchLabel_UpdateCardTable
     UpdateCardTable:
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
-MixedArenaGC4:
+marshal5:
 		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
@@ -365,26 +430,39 @@ NESTED_ENTRY JIT_WriteBarrier_SVR32, _TEXT
         ; unconditionally.
         ;
 
-		 mov     rax, rdx
+		bt      rcx,42
+		jnc     targetNotArena6
+		bt      rdx,42
+		jnc      marshal6
+
+		; both arena - check if same buffer
+		mov     rax,rdx
 		xor     rax,rcx
-		mov   r10,1
-		shl   r10,42
-		test   rax, r10
-		jnz    MixedArenaGC5
-;		bt      rax,42
-;		jc	    MixedArenaGC5
-		test   rcx, r10
-		jz   NotMixedArenaGC5
-;	    bt      rcx,42
-;		jnc      NotMixedArenaGC5
-		shr     rax,32
-		and      eax,3ffh
-		jne      MixedArenaGC5
-		; valid arena write barrier
-		mov     [rcx], rdx
+		shr     rax,20
+		and     rax,3fffffh
+		je      nomarshalarena6
+
+		; check if buffers come from same arena
+		mov     rax,rdx
+		shr     rax,20
+		and     rax,3fffffh
+		mov     r8d,1
+		shl     r8,42
+		push	rbx
+		mov     bx,[r8+2*rax]
+		mov     rax,rcx
+		shr     rax,20
+		and     rax,3fffffh
+		cmp     bx,[r8+2*rax]
+		pop		rbx
+		jne     marshal6
+nomarshalarena6:
+		mov     [rcx],rdx
 		ret
 
-NotMixedArenaGC5:
+targetNotArena6:  
+		bt		rdx,42
+		jc		marshal6
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
@@ -392,8 +470,8 @@ NotMixedArenaGC5:
         mov     [rcx], rdx
 
         shr     rcx, 0Bh
-
-        NOP ; padding for alignment of constant
+		nop
+		nop
 
 PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_CheckCardTable
         cmp     byte ptr [rcx + 0F0F0F0F0h], 0FFh
@@ -407,7 +485,7 @@ PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_UpdateCardTable
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
 
-MixedArenaGC5:
+marshal6:
 		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
@@ -435,38 +513,58 @@ NESTED_ENTRY JIT_WriteBarrier_SVR64, _TEXT
         ; bounds checking all together and do our card table update 
         ; unconditionally.
         ;
-		 mov     rax, rdx
+		bt      rcx,42
+		jnc     targetNotArena7
+		bt      rdx,42
+		jnc      marshal7
+
+		; both arena - check if same buffer
+		mov     rax,rdx
 		xor     rax,rcx
-		mov   r10,1
-		shl   r10,42
-		test   rax, r10
-		jnz    MixedArenaGC6
-;		bt      rax,42
-;		jc	    MixedArenaGC6
-		test   rcx, r10
-		jz   NotMixedArenaGC6
-;	    bt      rcx,42
-;		jnc      NotMixedArenaGC6
-		shr     rax,32
-		and      eax,3ffh
-		jne      MixedArenaGC6
-		; valid arena write barrier
-		mov     [rcx], rdx
+		shr     rax,20
+		and     rax,3fffffh
+		je      nomarshalarena7
+
+		; check if buffers come from same arena
+		mov     rax,rdx
+		shr     rax,20
+		and     rax,3fffffh
+		mov     r8d,1
+		shl     r8,42
+		push	rbx
+		mov     bx,[r8+2*rax]
+		mov     rax,rcx
+		shr     rax,20
+		and     rax,3fffffh
+		cmp     bx,[r8+2*rax]
+		pop		rbx
+		jne     marshal7
+nomarshalarena7:
+		mov     [rcx],rdx
 		ret
 
-NotMixedArenaGC6:
+targetNotArena7:  
+		bt		rdx,42
+		jc		marshal7
         ; Do the move into the GC .  It is correct to take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
         mov     [rcx], rdx
 
-		NOP ; padding for alignment of constant
+		nop
+		nop
+		nop
+		nop
+		nop
+		nop
 
 PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
         mov     rax, 0F0F0F0F0F0F0F0F0h
 
         shr     rcx, 0Bh
+		nop
+		nop
 
         cmp     byte ptr [rcx + rax], 0FFh
         jne     UpdateCardTable
@@ -476,7 +574,7 @@ PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
         mov     byte ptr [rcx + rax], 0FFh
         ret
 
-MixedArenaGC6:
+marshal7:
 		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
@@ -487,7 +585,7 @@ MixedArenaGC6:
         mov                 rax, ArenaMarshal
 		call                rax
 
-        add                 r10, 20h
+        add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
 		pop rcx
 		mov     [rcx], rax

@@ -2879,7 +2879,7 @@ HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
         SIZE_T size = methodTable->GetBaseSize();
         _ASSERTE(size % DATA_ALIGNMENT == 0);
 		
-		void* p = ::ArenaManager::Allocate(size);
+		void* p = ::ArenaManager::Allocate(size,0);
 		if (p != nullptr)
 		{
 			//::ArenaManager::Log("JIT_NewS_MP_FastPortable arena",(size_t)p);
