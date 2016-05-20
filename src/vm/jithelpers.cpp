@@ -24,6 +24,7 @@
 #include "securitymeta.h"
 #include "dllimport.h"
 #include "gc.h"
+#include "../gc/Arena/arenaManager.h"
 #include "comdelegate.h"
 #include "jitperf.h" // to track jit perf
 #include "corprof.h"
@@ -1445,7 +1446,6 @@ HCIMPLEND
 HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Portable, SIZE_T moduleDomainID, DWORD dwClassDomainID)
 {
 	FCALL_CONTRACT;
-
 	DomainLocalModule *pLocalModule = NULL;
 
 	if (!Module::IsEncodedModuleIndex(moduleDomainID))
@@ -1465,7 +1465,12 @@ HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Portable, SIZE_T moduleDomainID, DWO
 
 	// Tailcall to the slow helper
 	ENDFORBIDGC();
-	return HCCALL2(JIT_GetSharedNonGCStaticBase_Helper, pLocalModule, dwClassDomainID);
+
+	/*START_NOT_ARENA_SECTION*/
+
+	void* retVal = HCCALL2(JIT_GetSharedNonGCStaticBase_Helper, pLocalModule, dwClassDomainID);
+	/*END_NOT_ARENA_SECTION*/
+	return retVal;
 }
 HCIMPLEND
 
@@ -1544,7 +1549,6 @@ HCIMPLEND
 HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Helper, DomainLocalModule *pLocalModule, DWORD dwClassDomainID)
 {
 	FCALL_CONTRACT;
-
 	HELPER_METHOD_FRAME_BEGIN_RET_0();
 
 	// Obtain Method table
@@ -1554,14 +1558,14 @@ HCIMPL2(void*, JIT_GetSharedNonGCStaticBase_Helper, DomainLocalModule *pLocalMod
 	pMT->CheckRunClassInitThrowing();
 	HELPER_METHOD_FRAME_END();
 
-	return (void*)pLocalModule->GetPrecomputedNonGCStaticsBasePointer();
+	auto r = (void*)pLocalModule->GetPrecomputedNonGCStaticsBasePointer();
+	return r;
 }
 HCIMPLEND
 
 HCIMPL2(void*, JIT_GetSharedGCStaticBase_Helper, DomainLocalModule *pLocalModule, DWORD dwClassDomainID)
 {
 	FCALL_CONTRACT;
-
 	HELPER_METHOD_FRAME_BEGIN_RET_0();
 
 	// Obtain Method table
@@ -1571,7 +1575,8 @@ HCIMPL2(void*, JIT_GetSharedGCStaticBase_Helper, DomainLocalModule *pLocalModule
 	pMT->CheckRunClassInitThrowing();
 	HELPER_METHOD_FRAME_END();
 
-	return (void*)pLocalModule->GetPrecomputedGCStaticsBasePointer();
+	auto r = (void*)pLocalModule->GetPrecomputedGCStaticsBasePointer();
+	return r;
 }
 HCIMPLEND
 
@@ -2857,6 +2862,7 @@ HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
 {
 	FCALL_CONTRACT;
 
+
 	do
 	{
 		_ASSERTE(GCHeap::UseAllocationContexts());
@@ -2873,17 +2879,27 @@ HCIMPL1(Object*, JIT_NewS_MP_FastPortable, CORINFO_CLASS_HANDLE typeHnd_)
 		SIZE_T size = methodTable->GetBaseSize();
 		_ASSERTE(size % DATA_ALIGNMENT == 0);
 
-		alloc_context *allocContext = thread->GetAllocContext();
-		BYTE *allocPtr = allocContext->alloc_ptr;
-		_ASSERTE(allocPtr <= allocContext->alloc_limit);
-		if (size > static_cast<SIZE_T>(allocContext->alloc_limit - allocPtr))
+		void* p = ::ArenaManager::Allocate(size, 0);
+		if (p != nullptr)
 		{
-			break;
+			//::ArenaManager::Log("JIT_NewS_MP_FastPortable arena",(size_t)p);
 		}
-		allocContext->alloc_ptr = allocPtr + size;
+		else {
 
-		_ASSERTE(allocPtr != nullptr);
-		Object *object = reinterpret_cast<Object *>(allocPtr);
+			alloc_context *allocContext = thread->GetAllocContext();
+			BYTE *allocPtr = allocContext->alloc_ptr;
+			_ASSERTE(allocPtr <= allocContext->alloc_limit);
+			if (size > static_cast<SIZE_T>(allocContext->alloc_limit - allocPtr))
+			{
+				break;
+			}
+			allocContext->alloc_ptr = allocPtr + size;
+
+			_ASSERTE(allocPtr != nullptr);
+			p = allocPtr;
+			//::ArenaManager::Log("JIT_NewS_MP_FastPortable GC", (size_t)p);
+		}
+		Object *object = reinterpret_cast<Object *>(p);
 		_ASSERTE(object->HasEmptySyncBlockInfo());
 		object->SetMethodTable(methodTable);
 
@@ -3305,6 +3321,7 @@ HCIMPL2(Object*, JIT_NewArr1, CORINFO_CLASS_HANDLE arrayTypeHnd_, INT_PTR size)
 {
 	FCALL_CONTRACT;
 
+
 	OBJECTREF newArray = NULL;
 
 	HELPER_METHOD_FRAME_BEGIN_RET_0();    // Set up a frame
@@ -3364,7 +3381,6 @@ HCIMPL2(Object*, JIT_NewArr1, CORINFO_CLASS_HANDLE arrayTypeHnd_, INT_PTR size)
 
 		if (g_pPredefinedArrayTypes[elemType] == NULL)
 			g_pPredefinedArrayTypes[elemType] = pArrayClassRef;
-
 		newArray = FastAllocatePrimitiveArray(pArrayClassRef->GetMethodTable(), static_cast<DWORD>(size), bAllocateInLargeHeap);
 	}
 	else

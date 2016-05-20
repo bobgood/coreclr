@@ -300,11 +300,13 @@ void ThreadLocalBlock::AllocateThreadStaticHandles(Module * pModule, PTR_ThreadL
 
 	if (pModule->GetNumGCThreadStaticHandles() > 0)
 	{
-		AllocateStaticFieldObjRefPtrs(pModule->GetNumGCThreadStaticHandles(),
-			pThreadLocalModule->GetPrecomputedGCStaticsBaseHandleAddress());
+		START_NOT_ARENA_SECTION
+			AllocateStaticFieldObjRefPtrs(pModule->GetNumGCThreadStaticHandles(),
+				pThreadLocalModule->GetPrecomputedGCStaticsBaseHandleAddress());
 
-		// We should throw if we fail to allocate and never hit this assert
-		_ASSERTE(pThreadLocalModule->GetPrecomputedGCStaticsBaseHandle() != NULL);
+		END_NOT_ARENA_SECTION
+			// We should throw if we fail to allocate and never hit this assert
+			_ASSERTE(pThreadLocalModule->GetPrecomputedGCStaticsBaseHandle() != NULL);
 		_ASSERTE(pThreadLocalModule->GetPrecomputedGCStaticsBasePointer() != NULL);
 	}
 }
@@ -327,17 +329,19 @@ OBJECTHANDLE ThreadLocalBlock::AllocateStaticFieldObjRefPtrs(int nRequested, OBJ
 		return *ppLazyAllocate;
 	}
 
-	// Make sure the large heap handle table is initialized.
-	if (!m_pThreadStaticHandleTable)
-		InitThreadStaticHandleTable();
+	START_NOT_ARENA_SECTION
+		// Make sure the large heap handle table is initialized.
+		if (!m_pThreadStaticHandleTable)
+			InitThreadStaticHandleTable();
 
 	// Allocate the handles.
 	OBJECTHANDLE result = m_pThreadStaticHandleTable->AllocateHandles(nRequested);
+	END_NOT_ARENA_SECTION
 
-	if (ppLazyAllocate)
-	{
-		*ppLazyAllocate = result;
-	}
+		if (ppLazyAllocate)
+		{
+			*ppLazyAllocate = result;
+		}
 
 	return result;
 }
@@ -354,9 +358,11 @@ void ThreadLocalBlock::InitThreadStaticHandleTable()
 	}
 	CONTRACTL_END;
 
-	// If the allocation fails this will throw; callers need
-	// to account for this possibility
-	m_pThreadStaticHandleTable = new ThreadStaticHandleTable(GetAppDomain());
+	START_NOT_ARENA_SECTION
+		// If the allocation fails this will throw; callers need
+		// to account for this possibility
+		m_pThreadStaticHandleTable = new ThreadStaticHandleTable(GetAppDomain());
+	END_NOT_ARENA_SECTION
 }
 
 void ThreadLocalBlock::AllocateThreadStaticBoxes(MethodTable * pMT)
@@ -392,11 +398,12 @@ void ThreadLocalBlock::AllocateThreadStaticBoxes(MethodTable * pMT)
 			// AllocateStaticBox will pin this object if this class is FixedAddressVTStatics.
 			// We save this pinning handle in a list attached to the ThreadLocalBlock. When
 			// the thread dies, we release all the pinning handles in the list.
-
-			OBJECTHANDLE handle;
+			START_NOT_ARENA_SECTION
+				OBJECTHANDLE handle;
 			OBJECTREF obj = MethodTable::AllocateStaticBox(pFieldMT, pMT->HasFixedAddressVTStatics(), &handle);
+			END_NOT_ARENA_SECTION
 
-			PTR_BYTE pStaticBase = pMT->GetGCThreadStaticsBasePointer();
+				PTR_BYTE pStaticBase = pMT->GetGCThreadStaticsBasePointer();
 			_ASSERTE(pStaticBase != NULL);
 
 			SetObjectReference((OBJECTREF*)(pStaticBase + pField->GetOffset()), obj, GetAppDomain());
@@ -438,13 +445,13 @@ void    ThreadLocalModule::EnsureDynamicClassIndex(DWORD dwID)
 	}
 
 	DynamicClassInfo* pNewDynamicClassTable;
-
-	// If this allocation fails, we throw. If it succeeds,
-	// then we are good to go
-	pNewDynamicClassTable = (DynamicClassInfo*)(void*)new BYTE[sizeof(DynamicClassInfo) * aDynamicEntries];
-
-	// Zero out the dynamic class table
-	memset(pNewDynamicClassTable, 0, sizeof(DynamicClassInfo) * aDynamicEntries);
+	START_NOT_ARENA_SECTION
+		// If this allocation fails, we throw. If it succeeds,
+		// then we are good to go
+		pNewDynamicClassTable = (DynamicClassInfo*)(void*)new BYTE[sizeof(DynamicClassInfo) * aDynamicEntries];
+	END_NOT_ARENA_SECTION
+		// Zero out the dynamic class table
+		memset(pNewDynamicClassTable, 0, sizeof(DynamicClassInfo) * aDynamicEntries);
 
 	// We might always be guaranteed that this will be non-NULL, but just to be safe
 	if (m_pDynamicClassTable != NULL)
@@ -524,12 +531,17 @@ void    ThreadLocalModule::AllocateDynamicClass(MethodTable *pMT)
 
 		if (dwNumHandleStatics > 0)
 		{
-			PTR_ThreadLocalBlock pThreadLocalBlock = GetThread()->m_pThreadLocalBlock;
+			START_NOT_ARENA_SECTION
+
+				PTR_ThreadLocalBlock pThreadLocalBlock = GetThread()->m_pThreadLocalBlock;
 			_ASSERTE(pThreadLocalBlock != NULL);
 			pThreadLocalBlock->AllocateStaticFieldObjRefPtrs(dwNumHandleStatics,
 				&pDynamicStatics->m_pGCStatics);
+			END_NOT_ARENA_SECTION
 		}
 	}
+
+
 }
 
 void ThreadLocalModule::PopulateClass(MethodTable *pMT)
@@ -559,7 +571,9 @@ void ThreadLocalModule::PopulateClass(MethodTable *pMT)
 	{
 		PTR_ThreadLocalBlock pThreadLocalBlock = ThreadStatics::GetCurrentTLB();
 		_ASSERTE(pThreadLocalBlock != NULL);
-		pThreadLocalBlock->AllocateThreadStaticBoxes(pMT);
+		START_NOT_ARENA_SECTION
+			pThreadLocalBlock->AllocateThreadStaticBoxes(pMT);
+		END_NOT_ARENA_SECTION
 	}
 
 	// Mark the class as allocated
@@ -582,11 +596,13 @@ PTR_ThreadLocalModule ThreadStatics::AllocateAndInitTLM(ModuleIndex index, PTR_T
 	_ASSERTE(pThreadLocalBlock != NULL);
 	_ASSERTE(pModule != NULL);
 
-	NewHolder<ThreadLocalModule> pThreadLocalModule = AllocateTLM(pModule);
+	START_NOT_ARENA_SECTION
+		NewHolder<ThreadLocalModule> pThreadLocalModule = AllocateTLM(pModule);
 
 	pThreadLocalBlock->AllocateThreadStaticHandles(pModule, pThreadLocalModule);
+	END_NOT_ARENA_SECTION
 
-	pThreadLocalBlock->SetModuleSlot(index, pThreadLocalModule);
+		pThreadLocalBlock->SetModuleSlot(index, pThreadLocalModule);
 	pThreadLocalModule.SuppressRelease();
 
 	return pThreadLocalModule;

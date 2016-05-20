@@ -1,4 +1,5 @@
 // Licensed to the .NET Foundation under one or more agreements.
+// Licensed to the .NET Foundation under one or more agreements.
 // The .NET Foundation licenses this file to you under the MIT license.
 // See the LICENSE file in the project root for more information.
 
@@ -17,6 +18,7 @@
 #include "eetwain.h"
 #include "eeconfig.h"
 #include "gc.h"
+#include "..\gc\Arena\arenaManager.h"
 #include "corhost.h"
 #include "threads.h"
 #include "fieldmarshaler.h"
@@ -97,6 +99,11 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 		(bFinalize ? GC_ALLOC_FINALIZE : 0));
 
 	Object *retVal = NULL;
+	retVal = (Object *)::ArenaManager::Allocate(size, flags);
+	if (retVal != nullptr)
+	{
+		return retVal;
+	}
 
 	// We don't want to throw an SO during the GC, so make sure we have plenty
 	// of stack before calling in.
@@ -106,6 +113,7 @@ inline Object* Alloc(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 	else
 		retVal = GCHeap::GetGCHeap()->Alloc(size, flags);
 	END_INTERIOR_STACK_PROBE;
+	::ArenaManager::RegisterAddress(retVal);
 	return retVal;
 }
 
@@ -125,6 +133,13 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
 		(bAlignBias ? GC_ALLOC_ALIGN8_BIAS : 0));
 
 	Object *retVal = NULL;
+	retVal = (Object *)::ArenaManager::Allocate(size);
+	if (retVal != nullptr)
+	{
+
+		::ArenaManager::Log("AllocateObject arena2", retVal, size);
+		return retVal;
+	}
 
 	// We don't want to throw an SO during the GC, so make sure we have plenty
 	// of stack before calling in.
@@ -135,6 +150,8 @@ inline Object* AllocAlign8(size_t size, BOOL bFinalize, BOOL bContainsPointers, 
 		retVal = GCHeap::GetGCHeap()->AllocAlign8(size, flags);
 
 	END_INTERIOR_STACK_PROBE;
+	::ArenaManager::RegisterAddress(retVal);
+	::ArenaManager::Log("AllocateObject GC2", retVal, size);
 	return retVal;
 }
 #endif // FEATURE_64BIT_ALIGNMENT
@@ -168,12 +185,22 @@ inline Object* AllocLHeap(size_t size, BOOL bFinalize, BOOL bContainsPointers)
 		(bFinalize ? GC_ALLOC_FINALIZE : 0));
 
 	Object *retVal = NULL;
+	retVal = (Object *)::ArenaManager::Allocate(size, flags);
+	if (retVal != nullptr)
+	{
+
+		::ArenaManager::Log("AllocateObject arena3", (size_t)retVal, size);
+		return retVal;
+	}
+
 
 	// We don't want to throw an SO during the GC, so make sure we have plenty
 	// of stack before calling in.
 	INTERIOR_STACK_PROBE_FOR(GetThread(), static_cast<unsigned>(DEFAULT_ENTRY_PROBE_AMOUNT * 1.5));
 	retVal = GCHeap::GetGCHeap()->AllocLHeap(size, flags);
 	END_INTERIOR_STACK_PROBE;
+	::ArenaManager::Log("AllocateObject GC3", (size_t)retVal, size);
+	::ArenaManager::RegisterAddress(retVal);
 	return retVal;
 }
 
@@ -377,12 +404,15 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	if (maxArrayDimensionLengthOverflow)
 		ThrowOutOfMemoryDimensionsExceeded();
 
+
 	// Allocate the space from the GC heap
 	S_SIZE_T safeTotalSize = S_SIZE_T(cElements) * S_SIZE_T(componentSize) + S_SIZE_T(pArrayMT->GetBaseSize());
 	if (safeTotalSize.IsOverflow())
 		ThrowOutOfMemoryDimensionsExceeded();
 
 	size_t totalSize = safeTotalSize.Value();
+
+
 
 #ifdef FEATURE_DOUBLE_ALIGNMENT_HINT
 	if ((elemType == ELEMENT_TYPE_R8) &&
@@ -423,8 +453,7 @@ OBJECTREF AllocateArrayEx(TypeHandle arrayType, INT32 *pArgs, DWORD dwNumArgs, B
 	// Initialize Object
 	orArray->m_NumComponents = cElements;
 
-	if (bAllocateInLargeHeap ||
-		(totalSize >= LARGE_OBJECT_SIZE))
+	if (bAllocateInLargeHeap || totalSize >= LARGE_OBJECT_SIZE)
 	{
 		GCHeap::GetGCHeap()->PublishObject((BYTE*)orArray);
 	}
@@ -597,9 +626,11 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 	BOOL bPublish = bAllocateInLargeHeap;
 
 	ArrayBase* orObject;
+
 	if (bAllocateInLargeHeap)
 	{
 		orObject = (ArrayBase*)AllocLHeap(totalSize, FALSE, FALSE);
+
 	}
 	else
 	{
@@ -635,6 +666,8 @@ OBJECTREF   FastAllocatePrimitiveArray(MethodTable* pMT, DWORD cElements, BOOL b
 			}
 			_ASSERTE(((size_t)orObject % sizeof(double)) == 0);
 			orDummyObject->SetMethodTable(g_pObjectClass);
+
+
 		}
 		else
 		{
@@ -848,7 +881,6 @@ STRINGREF SlowAllocateString(DWORD cchStringLength)
 	SetTypeHandleOnThreadForAlloc(TypeHandle(g_pStringClass));
 
 	orObject = (StringObject *)Alloc(ObjectSize, FALSE, FALSE);
-
 	// Object is zero-init already
 	_ASSERTE(orObject->HasEmptySyncBlockInfo());
 
@@ -987,16 +1019,18 @@ OBJECTREF AllocateObject(MethodTable *pMT
 		else
 #endif // FEATURE_64BIT_ALIGNMENT
 		{
+
 			orObject = (Object *)Alloc(baseSize,
 				pMT->HasFinalizer(),
 				pMT->ContainsPointers());
 		}
 
 		// verify zero'd memory (at least for sync block)
+
+		// Object is zero-init already
 		_ASSERTE(orObject->HasEmptySyncBlockInfo());
 
-
-		if ((baseSize >= LARGE_OBJECT_SIZE))
+		if (baseSize >= LARGE_OBJECT_SIZE)
 		{
 			orObject->SetMethodTableForLargeObject(pMT);
 			GCHeap::GetGCHeap()->PublishObject((BYTE*)orObject);

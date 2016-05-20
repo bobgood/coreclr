@@ -1460,6 +1460,15 @@ void SetObjectReferenceUnchecked(OBJECTREF *dst, OBJECTREF ref)
 	STATIC_CONTRACT_MODE_COOPERATIVE;
 	STATIC_CONTRACT_CANNOT_TAKE_LOCK;
 
+	Object* oref = OBJECTREFToObject(ref);
+	if (ISARENA(dst) ? !ISSAMEARENA(dst, oref) : ISARENA(oref))
+	{
+		Object* ref2 = (Object*)::ArenaManager::ArenaMarshal(dst, oref);
+
+		VolatileStore<Object*>((Object**)dst, ref2);
+		return;
+	}
+
 	// Assign value. We use casting to avoid going thru the overloaded
 	// OBJECTREF= operator which in this case would trigger a false
 	// write-barrier violation assert.
@@ -1663,6 +1672,11 @@ VOID Object::Validate(BOOL bDeep, BOOL bVerifyNextHeader, BOOL bVerifySyncBlock)
 		return;     // NULL is ok
 	}
 
+	if (ISARENA(this))
+	{
+		return;
+	}
+
 	if (g_IBCLogger.InstrEnabled() && !GCStress<cfg_any>::IsEnabled())
 	{
 		// If we are instrumenting for IBC (and GCStress is not enabled)
@@ -1741,7 +1755,14 @@ VOID Object::ValidateInner(BOOL bDeep, BOOL bVerifyNextHeader, BOOL bVerifySyncB
 		if (!bSmallObjectHeapPtr)
 			bLargeObjectHeapPtr = GCHeap::GetGCHeap()->IsHeapPointer(this);
 
-		CHECK_AND_TEAR_DOWN(bSmallObjectHeapPtr || bLargeObjectHeapPtr);
+		if (!(bSmallObjectHeapPtr || bLargeObjectHeapPtr))
+		{
+			if (!ISARENA(this))
+			{
+				CHECK_AND_TEAR_DOWN(bSmallObjectHeapPtr || bLargeObjectHeapPtr);
+			}
+		}
+
 	}
 
 	lastTest = 3;
@@ -1964,7 +1985,7 @@ STRINGREF StringObject::NewString(const WCHAR *pwsz, int length) {
 		// pointer from the gc heap here as long as it is pinned.  This
 		// can happen when a string is marshalled to unmanaged by 
 		// pinning and then later put into a struct and that struct is
-		// then marshalled to managed.  
+		// then marshalled to managed.   
 		//
 		_ASSERTE(!GCHeap::GetGCHeap()->IsHeapPointer((BYTE *)pwsz) ||
 			!"pwsz can not point to GC Heap");

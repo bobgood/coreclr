@@ -33908,7 +33908,7 @@ void GCHeap::Relocate (Object** ppObject, ScanContext* sc,
     // For now we simply look at the size of the object to determine if it in the
     // fixed heap or not. If the bit indicating this gets set at some point
     // we should key off that instead.
-    return size( pObj ) >= LARGE_OBJECT_SIZE ;
+    return size( pObj ) >= LARGE_OBJECT_SIZE && !ISARENA(pObj) ;
 }
 
 #ifndef FEATURE_REDHAWK // Redhawk forces relocation a different way
@@ -35622,6 +35622,7 @@ int GCHeap::EndNoGCRegion()
 void GCHeap::PublishObject (uint8_t* Obj)
 {	
 #ifdef BACKGROUND_GC
+	if (ISARENA(Obj)) return;
     gc_heap* hp = gc_heap::heap_of (Obj);
 		hp->bgc_alloc_lock->loh_alloc_done (Obj);
 #endif //BACKGROUND_GC
