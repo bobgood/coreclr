@@ -11,10 +11,12 @@
 #include <strsafe.h>
 #include "class.h"
 #include "set.h"
+#include "vector.h"
+#include "hashtable.h"
 
 #define LOGGING
 
- ArenaVirtualMemoryState ArenaVirtualMemory::s;
+ArenaVirtualMemoryState ArenaVirtualMemory::s;
 
 TypeHandle LoadExactFieldType(FieldDesc *pFD, MethodTable *pEnclosingMT, AppDomain *pDomain);
 
@@ -33,6 +35,12 @@ set verifiedObjects;
 
 void ArenaManager::InitArena()
 {
+#ifdef DEBUG
+	vector<int>::Test();
+	hashtable::Test();
+	set::Test();
+#endif
+
 	for (int i = 0; i < maxArenas; i++)
 	{
 		arenaById[i] = nullptr;
@@ -41,7 +49,7 @@ void ArenaManager::InitArena()
 
 	ArenaVirtualMemory::Initialize();
 #ifdef VERIFYALLOC
-	ClrVirtualAlloc((LPVOID)0x60000000000, 1024*1024*1024, MEM_COMMIT, PAGE_READWRITE);
+	ClrVirtualAlloc((LPVOID)0x60000000000, 1024 * 1024 * 1024, MEM_COMMIT, PAGE_READWRITE);
 	*(size_t*)0x60000000000 = 0x60000000008;
 #endif
 }
@@ -195,40 +203,12 @@ Arena* ArenaManager::MakeArena()
 	ArenaId id = getId();
 	void* arenaBase = ArenaVirtualMemory::GetBuffer(id);
 
-	Arena* arena = Arena::MakeArena(id, (size_t)arenaBase, ArenaVirtualMemory::bufferSize, ArenaVirtualMemory::arenaBaseSize/4);
+	Arena* arena = Arena::MakeArena(id, (size_t)arenaBase, ArenaVirtualMemory::bufferSize, ArenaVirtualMemory::arenaBaseSize / 4);
 	//Log("Arena is registered ", (size_t)arena);
 	arenaById[id] = arena;
 	return arena;
 }
 
-void _cdecl ArenaManager::PushGC()
-{
-	GetArenaStack().Push(nullptr);
-	//Log("GC Push", GetArenaStack().Size());
-	if (GetArenaStack().Size() > 3)
-	{
-		//Log("over GC Push", GetArenaStack().Size());
-	}
-}
-
-void _cdecl ArenaManager::Pop()
-{
-	void* allocator = GetArenaStack().Pop();
-	if (allocator != nullptr)
-	{
-		DereferenceId(ArenaVirtualMemory::ArenaNumber(allocator));
-		//Log("Arena Pop", GetArenaStack().Size());
-	}
-	else {
-		//Log("GC Pop", GetArenaStack().Size());
-	}
-}
-
-
-void* ArenaManager::GetArena()
-{
-	return GetArenaStack().Current();
-}
 
 void ArenaManager::DeleteAllocator(void* vallocator)
 {
@@ -241,20 +221,7 @@ void ArenaManager::DeleteAllocator(void* vallocator)
 	allocator->Destroy();
 }
 
-inline
-size_t ArenaManager::Align(size_t nbytes, int alignment)
-{
-	return (nbytes + alignment) & ~alignment;
-}
-
-inline void* ArenaManager::AllocatorFromAddress(void * addr)
-{
-	ArenaId id = ArenaVirtualMemory::ArenaNumber(addr);
-	if (id == -1) return nullptr;
-	return arenaById[id];
-}
-
-void* ArenaManager::Peek()
+inline void* ArenaManager::Peek()
 {
 	ArenaThread* arena = (ArenaThread*)GetArenaStack().Current();
 	if (arena == nullptr)
@@ -263,8 +230,6 @@ void* ArenaManager::Peek()
 	}
 	return (arena)->Allocate(0);
 }
-int cnty = 0;
-int cntx = 0;
 
 void  ArenaManager::RegisterForFinalization(Object* o, size_t size)
 {
@@ -293,7 +258,7 @@ void* ArenaManager::Allocate(ArenaThread* arena, size_t jsize)
 {
 	size_t size = Align(jsize);
 	void*ret = (arena)->Allocate(size);
-	
+
 	memset(ret, 0, size);
 	return (void*)((char*)ret);
 }
@@ -332,7 +297,7 @@ void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr, size_t n3)
 	DWORD written;
 
 	_itoa(lcnt++, pbuf, 10);
-	pbufI = strlen(pbuf); 
+	pbufI = strlen(pbuf);
 	//pbuf[pbufI++] = ',';
 	//_itoa(WKS::hcnt, pbuf + pbufI, 10);
 	//pbufI = strlen(pbuf);
@@ -411,423 +376,367 @@ void ArenaManager::Log(char *str, size_t n, size_t n2, char*hdr, size_t n3)
 }
 
 #define header(i) ((CObjectHeader*)(i))
-bool show = false;
 
 alloc_context* GetThreadAllocContext();
 
 #define ROUNDSIZE(x) (((size_t)(x)+7)&~7)
-void*  ArenaManager::ArenaMarshal(void*vdst, void*vsrc)
+struct MarshalRequest
 {
-	if (vsrc == nullptr) return nullptr;
+	Object** dst;
+	Object* src;
+	size_t valueTypeSize;
+	MethodTable* pMT;
+
+	MarshalRequest(Object*csrc, Object**cdst)
+	{
+		dst = cdst;
+		src = csrc;
+		valueTypeSize = 0;
+		pMT = nullptr;
+	}
+
+	MarshalRequest(Object*csrc, Object**cdst, size_t ivalueTypeSize, MethodTable* mt)
+	{
+		dst = cdst;
+		src = csrc;
+		valueTypeSize = ivalueTypeSize;
+		pMT = mt;
+	}
+
+	MarshalRequest()
+	{
+		dst = 0;
+		src = 0;
+	}
+
+	bool operator==(MarshalRequest& ref)
+	{
+		return (ref.dst == dst && ref.src == src && ref.pMT == pMT && ref.valueTypeSize == valueTypeSize);
+	}
+};
+
+// We may need to recursively marshal objects, however we cannot use recursive functions
+// because we operate in cooperative mode with the GC, which means that we must be GC safe
+// as of the execution of each 'ret' instruction.  Thus we will use a queue to manage recursion.
+// ALL methods called must be inline methods.  LOGGING is not inline, so can create crashes, and
+// is only used for diagnostics.
+void*  ArenaManager::ArenaMarshal(void*idst, void*isrc)
+{
+	STATIC_CONTRACT_MODE_COOPERATIVE;
+	STATIC_CONTRACT_NOTHROW;
+	STATIC_CONTRACT_GC_TRIGGERS;
+	STATIC_CONTRACT_SO_TOLERANT;
+
+	if (isrc == nullptr) return nullptr;
+	Thread* thread = GetThread();
+
+	vector<MarshalRequest> queue;
+	queue.push_back(MarshalRequest((Object*)isrc, (Object**)idst));
+	Object* firstClone = nullptr;
+
+	while (!queue.empty())
+	{
+		MarshalRequest request = queue.pop_front();
+		queue.delete_repeat(request);
+
+		Object *src = request.src;
+		Object **dst = request.dst;
+
+		// if the destination address is in a GC HEAP, then dstAllocator == nullptr
+		Arena* dstAllocator = (Arena*)AllocatorFromAddress(dst);
+		MethodTable* pMT = request.pMT == nullptr ? src->GetMethodTable() : request.pMT;
+
+		// valueTypeSize is nonzero only for structs within either classes or arrays
+		size_t valueTypeSize = request.valueTypeSize;
+
+		// size includes header, methodtable and object
+		size_t size = (pMT->GetBaseSize() +
+			(pMT->HasComponentSize() ?
+				((size_t)(src->GetNumComponents() * pMT->RawGetComponentSize())) : 0));
+		size = ROUNDSIZE(size);
+
 #ifdef LOGGING
-	//VerifyObject((Object*)vsrc);
+		PushGC(thread);
+		DefineFullyQualifiedNameForClass();
+		char* name = (char*)GetFullyQualifiedNameForClass(pMT);
+		Pop(thread);
 #endif
-	// src Allocator is not used
-	Arena* srcAllocator = (Arena*)AllocatorFromAddress(vsrc);
-	Arena* dstAllocator = (Arena*)AllocatorFromAddress(vdst);
 
-	if (dstAllocator != nullptr && (size_t)dstAllocator < 0x40000000000)
-	{
-		Log("allocator table error", (size_t)vdst);
-	}
-	// overrunning allocator... ignore.
-	Object* src = (Object*)vsrc;
-
-	MethodTable* mT;
-	size_t cnt = 0;
-	mT = src->GetMethodTable();
-#ifdef LOGGING
-	START_NOT_ARENA_SECTION
-	DefineFullyQualifiedNameForClass();
-	char* name = (char*)GetFullyQualifiedNameForClass(mT);
-	END_NOT_ARENA_SECTION
-#else
-	char* name = "?";
-#endif
-
-	cnt = (mT->GetBaseSize() +
-		(mT->HasComponentSize() ?
-			((size_t)(src->GetNumComponents() * mT->RawGetComponentSize())) : 0));
-
-	size_t size = ROUNDSIZE(cnt);
-#ifdef LOGGING
-		Log("PreMarshall", (size_t)vsrc, (size_t)vdst, name, size);
-#endif
-	void *p = nullptr;
-	bool bContainsPointers = false;
-	bool bFinalize = false;
-	if (dstAllocator == nullptr)
-	{
-		PushGC();
-		DWORD flags = ((mT->ContainsPointers() ? GC_ALLOC_CONTAINS_REF : 0)
-		//	| (mT->HasFinalizer() ? GC_ALLOC_FINALIZE : 0)
-			);
-		if (GCHeap::UseAllocationContexts())
-			p = GCHeap::GetGCHeap()->Alloc(GetThreadAllocContext(), size, flags);
-		else
-			p = GCHeap::GetGCHeap()->Alloc(size, flags);
-		Pop();
-		
-	}
-	else
-	{
-		p = dstAllocator->ThreadSafeAllocate(size);
-	}
-
-	//Log("Cloned object allocated ", (size_t)p, size);
-	// We know this is not a ByValueClass, but we must do our own reflection, so we start with copying the whole
-	// class, and we will fix the fields that are not value v
-	//Log("memwrite", (size_t)p, (size_t)p + size);
-	PTR_MethodTable pMT = src->GetMethodTable();
-	if (pMT->IsArray())
-	{
-		Object* clone = (Object*)p;
-		for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
-		CloneArray(p, src, pMT, sizeof(ArrayBase), size);
-	}
-	else
-	{
-		Object* clone = (Object*)p;
-		for (size_t*ip = (size_t*)vsrc, *op = (size_t*)p; ip < (size_t*)((char*)vsrc + size); ) *op++ = *ip++;
-		size_t classSize = (char*)(src->GetData()) - (char*)src;
-		CloneClass(p, src, pMT, (int)classSize, size-classSize);
-	}
-#ifdef LOGGING
-
-		Log("ArenaMarshal clone", (size_t)src, (size_t)p, name, (size_t)vdst);
-		if ((size_t)p < 0x40000000000)
+		// Allocate memory for clone from either GC or arena
+		Object* clone = nullptr;
+		if (request.valueTypeSize != 0)
 		{
-			RegisterAddress(p);
+			clone = (Object*)request.dst;
 		}
-		//VerifyObject((Object*)p);
+		else {
+			if (dstAllocator == nullptr)
+			{
+				PushGC(thread);
+				DWORD flags = ((pMT->ContainsPointers() ? GC_ALLOC_CONTAINS_REF : 0) | (pMT->HasFinalizer() ? GC_ALLOC_FINALIZE : 0));
+				if (GCHeap::UseAllocationContexts())
+					clone = (Object*)GCHeap::GetGCHeap()->Alloc(GetThreadAllocContext(), size, flags);
+				else
+					clone = (Object*)GCHeap::GetGCHeap()->Alloc(size, flags);
+				// Pop is guaranteed not to call a method on the stack if it follows a PushGC();
+				Pop(thread);
+			}
+			else
+			{
+				clone = (Object*)dstAllocator->ThreadSafeAllocate(size);
+			}
+			// copy the message table pointer  leave the rest zero.
+			*(size_t*)clone = *(size_t*)src;
+		}
+		if (firstClone == nullptr)
+		{
+			firstClone = clone;
+		}
+
+		if (pMT == g_pStringClass)
+		{
+			size_t* csrc = (size_t*)src;
+			size_t* srcEnd = (size_t*)((char*)src + size);
+			size_t* cdst = (size_t*)clone;
+			while (csrc < srcEnd) *cdst++ = *csrc++;
+		}
+		else if (pMT->IsArray())
+		{
+			// copy length word
+
+			int ioffset = pMT->GetBaseSize();
+#ifdef AMD64
+			ioffset -= 8;
+#else
+			ioffset -= 4;
+#endif
+
+			memcpy(clone, src, ioffset);
+			TypeHandle arrayTypeHandle = ArrayBase::GetTypeHandle(pMT);
+			ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
+			TypeHandle ty = ar->GetArrayElementTypeHandle();
+			int componentSize = pMT->RawGetComponentSize();
+			ArrayBase* refArray = (ArrayBase*)src;
+			DWORD numComponents = refArray->GetNumComponents();
+			const CorElementType arrayElType = ty.GetVerifierCorElementType();
+
+			switch (arrayElType) {
+
+			case ELEMENT_TYPE_VALUETYPE:
+				for (size_t i = ioffset; i < ioffset + numComponents*componentSize; i += componentSize)
+				{
+					queue.push_back(
+						MarshalRequest(
+							(Object*)((char*)src + i),
+							(Object**)((char*)clone + i),
+							componentSize,
+							ty.AsMethodTable()));
+				}
+
+				break;
+			case ELEMENT_TYPE_STRING:
+			case ELEMENT_TYPE_CLASS: // objectrefs
+			{
+				// because ArenaMarshal can trigger
+				// a GC, it is necessary to put memory
+				// in a GC safe state first.
+				for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
+				{
+					void** rdst = (void**)((char*)clone + i);
+					*rdst = nullptr;
+				}
+
+				for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
+				{
+					Object *pSrc = *(Object **)((char*)src + i);
+					Object **pDst = (Object **)((char*)clone + i);
+					if (pSrc != nullptr)
+					{
+						queue.push_back(MarshalRequest(pSrc, pDst));
+					}
+				}
+			}
+
+			break;
+			case ELEMENT_TYPE_OBJECT:
+				DebugBreak();
+				break;
+			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+				DebugBreak();
+				break;
+			case ELEMENT_TYPE_ARRAY:        // all other arrays
+											// this is where we recursively follow
+				DebugBreak();
+				break;
+			default:
+			{
+				size_t* pSrc = (size_t*)src;
+				size_t* pSrcEnd = (size_t*)((char*)src + size);
+				size_t* pDst = (size_t*)clone;
+				for (; pSrc < pSrcEnd;) *pDst++ = *pSrc++;
+			}
+			break;
+			}
+		}
+		else  // Clone Class
+		{
+			size_t ioffset = (char*)(src->GetData()) - (char*)src;
+			size_t cloneSize = size - ioffset;
+			if (valueTypeSize != 0)
+			{
+				ioffset = 0;
+				cloneSize = valueTypeSize;
+			}
+
+#ifdef LOGGING
+			PushGC(thread);
+			DefineFullyQualifiedNameForClass();
+			char* name = (char*)GetFullyQualifiedNameForClass(pMT);
+			Pop(thread);
+#endif
+			auto pCurrMT = pMT;
+			while (pCurrMT)
+			{
+				DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
+				if (numInstanceFields == 0) break;
+
+				FieldDesc *pSrcFields = pCurrMT->GetApproxFieldDescListRaw();
+				if (pSrcFields == nullptr) break;
+
+				for (DWORD i = 0; i < numInstanceFields; i++)
+				{
+					FieldDesc &f = pSrcFields[i];// pSrcFields[i];
+
+					if (f.IsStatic()) continue;
+					CorElementType type = f.GetFieldType();
+					size_t offset = f.GetOffset() + ioffset;
+					if (pSrcFields[i].IsNotSerialized())
+					{
+						Log("IsNotSerialized", offset);
+						continue;
+					}
+
+					if (offset >= cloneSize)
+					{
+						continue;
+					}
+
+#ifdef DEBUG
+					LPCUTF8 szFieldName = f.GetDebugName();
+					//Log((char*)szFieldName, offset, 0, "field");
+#endif
+
+
+					switch (type) {
+
+					case ELEMENT_TYPE_VALUETYPE:
+					{
+						TypeHandle th = LoadExactFieldType(&pSrcFields[i], pMT, GetAppDomain());
+						queue.push_back(
+							MarshalRequest(
+								(Object*)((char*)src + offset),
+								(Object**)((char*)clone + offset),
+								th.AsMethodTable()->GetBaseSize(),
+								th.AsMethodTable()
+								));
+					}
+					break;
+
+					case ELEMENT_TYPE_STRING:
+					case ELEMENT_TYPE_CLASS: // objectrefs
+					case ELEMENT_TYPE_OBJECT:
+					case ELEMENT_TYPE_SZARRAY:      // single dim, zero
+					case ELEMENT_TYPE_ARRAY:        // all other arrays
+					{
+						void *pSrc = *(void **)((char*)src + offset);
+						if (pSrc != nullptr)
+						{
+							void** rdst = (void**)((char*)clone + offset);
+							queue.push_back(MarshalRequest(
+								(Object*)pSrc,
+								(Object**)rdst));
+						}
+					}
+					break;
+					case ELEMENT_TYPE_BOOLEAN:
+					case ELEMENT_TYPE_I1:
+					case ELEMENT_TYPE_U1:
+					{
+						char *pSrc = ((char*)src + offset);
+						char* pDst = ((char*)clone + offset);
+						*pDst = *pSrc;
+					}
+					break;
+
+					case ELEMENT_TYPE_CHAR:
+					case ELEMENT_TYPE_I2:
+					case ELEMENT_TYPE_U2:
+					{
+						short *pSrc2 = (short*)((char*)src + offset);
+						short* pDst2 = (short*)((char*)clone + offset);
+						*pDst2 = *pSrc2;
+					}
+					break;
+
+					case ELEMENT_TYPE_I4:
+					case ELEMENT_TYPE_U4:
+					case ELEMENT_TYPE_R4:
+					{
+						int *pSrc4 = (int*)((char*)src + offset);
+						int* pDst4 = (int*)((char*)clone + offset);
+						*pDst4 = *pSrc4;
+					}
+					break;
+					case ELEMENT_TYPE_PTR:
+					case ELEMENT_TYPE_FNPTR:
+						// pointers may be dangerous, but they are
+						// copied without chang
+
+					case ELEMENT_TYPE_I8:
+					case ELEMENT_TYPE_U8:
+					case ELEMENT_TYPE_R8:
+					{
+						size_t *pSrc8 = (size_t*)((char*)src + offset);
+						size_t* pDst8 = (size_t*)((char*)clone + offset);
+						*pDst8 = *pSrc8;
+					}
+					break;
+
+					default:
+						break;
+
+					}
+				}
+
+				pCurrMT = pCurrMT->GetParentMethodTable();
+			}
+		}
+#ifdef LOGGING
+
+		Log("ArenaMarshal clone", (size_t)src, (size_t)clone, name, (size_t)dst);
+#endif
+#ifdef VERIFYALLOC
+		if (!ISARENA(clone))
+		{
+			RegisterAddress(clone);
+		}
 		CheckAll();
 #endif
-		return p;
-}
 
-
-__declspec(noinline)
-void ArenaManager::CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int ioffset, size_t size)
-{
-
-	TypeHandle arrayTypeHandle = ArrayBase::GetTypeHandle(pMT);
-	ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
-	TypeHandle ty = ar->GetArrayElementTypeHandle();
-	int componentSize = pMT->RawGetComponentSize();
-	ArrayBase* refArray = (ArrayBase*)src;
-	DWORD numComponents = refArray->GetNumComponents();
-	const CorElementType arrayElType = ty.GetVerifierCorElementType();
-
-	switch (arrayElType) {
-
-	case ELEMENT_TYPE_VALUETYPE:
-		for (size_t i = ioffset; i < ioffset + numComponents*componentSize; i += componentSize)
+		if (valueTypeSize == 0)
 		{
-			CloneClass((char*)dst + i , (Object*)((char*)src + i), ty.AsMethodTable(), 0, componentSize);
-		}
-
-		break;
-	case ELEMENT_TYPE_STRING:
-		break;
-	case ELEMENT_TYPE_CLASS: // objectrefs
-	{
-		// because ArenaMarshal can trigger
-		// a GC, it is necessary to put memory
-		// in a GC safe state first.
-		for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
-		{
-			void** rdst = (void**)((char*)dst + i);
-			*rdst = nullptr;
-		}
-
-		for (int i = ioffset; i < ioffset + numComponents*sizeof(void*); i += sizeof(void*))
-		{
-			OBJECTREF *pSrc = *(OBJECTREF **)((char*)src + i);
-			if (pSrc != nullptr && (size_t)pSrc < ArenaVirtualMemory::arenaRangeEnd)
+			*dst = clone;
+			if (dstAllocator == nullptr)
 			{
-				void* clone = ArenaMarshal(dst, pSrc);
-				void** rdst = (void**)((char*)dst + i);
-				*rdst = clone;
-				if (!ISARENA(rdst))
-				{
+
 #ifdef _DEBUG
-					Thread::ObjectRefAssign(rdst);
+				Thread::ObjectRefAssign((OBJECTREF *)dst);
 #endif
-					ErectWriteBarrier((Object**)rdst, (Object*)clone);
-				}
-				//Log("memwriteptr", (size_t)rdst, (size_t)clone);
+				ErectWriteBarrier(dst, clone);
 			}
 		}
 	}
-
-	break;
-	case ELEMENT_TYPE_OBJECT:
-		break;
-	case ELEMENT_TYPE_SZARRAY:      // single dim, zero
-		break;
-	case ELEMENT_TYPE_ARRAY:        // all other arrays
-									// this is where we recursively follow
-		break;
-	default:
-		break;
-	}
+	return firstClone;
 }
-
-__declspec(noinline)
-void ArenaManager::CloneClass(void* dst, Object* src, PTR_MethodTable mt, int ioffset, size_t classSize)
-{
-#if DEBUG
-	//Log((char*)mt->GetDebugClassName(), 0, 0, "cloneclass");
-#endif
-
-	auto pCurrMT = mt;
-#ifdef LOGGING
-	START_NOT_ARENA_SECTION
-	DefineFullyQualifiedNameForClass();
-	char* name = (char*)GetFullyQualifiedNameForClass(mt);
-		Log("CloneClass", (size_t)src, classSize, name);
-	END_NOT_ARENA_SECTION
-#endif
-
-	while (pCurrMT)
-	{
-		DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
-		if (numInstanceFields == 0) break;
-
-		FieldDesc *pSrcFields = pCurrMT->GetApproxFieldDescListRaw();
-		if (pSrcFields == nullptr) break;
-
-		for (DWORD i = 0; i < numInstanceFields; i++)
-		{
-
-			FieldDesc &f = pSrcFields[i];// pSrcFields[i];
-			if (f.IsStatic()) continue;
-			CorElementType type = f.GetFieldType();
-			DWORD offset = f.GetOffset() + ioffset;
-			if (pSrcFields[i].IsNotSerialized())
-			{
-				Log("IsNotSerialized", offset);
-				continue;
-			}
-
-			if (offset >= classSize)
-			{
-				offset = f.GetOffset() + ioffset;
-				continue;  // this seems like a bug, but we workaround for prototypes
-			}
-
-#ifdef DEBUG
-			LPCUTF8 szFieldName = f.GetDebugName();
-			//Log((char*)szFieldName, offset, 0, "field");
-#endif
-
-
-			switch (type) {
-
-			case ELEMENT_TYPE_VALUETYPE:
-			{
-
-				TypeHandle th = LoadExactFieldType(&pSrcFields[i], mt, GetAppDomain());
-				CloneClass1((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), 0, th.AsMethodTable()->GetBaseSize());
-			}
-			break;
-			case ELEMENT_TYPE_PTR:
-			case ELEMENT_TYPE_FNPTR:
-				// pointers may be dangerous, but they are
-				// copied without chang
-				break;
-			case ELEMENT_TYPE_STRING:
-			case ELEMENT_TYPE_CLASS: // objectrefs
-			case ELEMENT_TYPE_OBJECT:
-			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
-			case ELEMENT_TYPE_ARRAY:        // all other arrays
-			{
-				void *pSrc = *(void **)((char*)src + offset);
-				if (pSrc != nullptr)
-				{
-
-					void** rdst = (void**)((char*)dst + offset);
-					// because ArenaMarshal can trigger a GC
-					// it is necessary to put memory in a GC
-					// safe state first.
-					*rdst = nullptr;
-
-				}
-			}
-			break;
-			default:
-				break;
-			}
-		}
-		pCurrMT = pCurrMT->GetParentMethodTable();
-
-	}
-
-	pCurrMT = mt;
-	while (pCurrMT)
-	{
-		DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
-		if (numInstanceFields == 0) break;
-
-		FieldDesc *pSrcFields = pCurrMT->GetApproxFieldDescListRaw();
-		if (pSrcFields == nullptr) break;
-
-		for (DWORD i = 0; i < numInstanceFields; i++)
-		{
-			FieldDesc &f = pSrcFields[i];// pSrcFields[i];
-
-			if (f.IsStatic()) continue;
-			CorElementType type = f.GetFieldType();
-			DWORD offset = f.GetOffset() + ioffset;
-			if (pSrcFields[i].IsNotSerialized())
-			{
-				Log("IsNotSerialized", offset);
-				continue;
-			}
-
-			if (offset >= classSize)
-			{
-				continue;
-			}
-
-#ifdef DEBUG
-			LPCUTF8 szFieldName = f.GetDebugName();
-			//Log((char*)szFieldName, offset, 0, "field");
-#endif
-
-
-			switch (type) {
-
-			case ELEMENT_TYPE_VALUETYPE:
-			{
-				TypeHandle th = LoadExactFieldType(&pSrcFields[i], mt, GetAppDomain());
-				CloneClass((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), 0, th.AsMethodTable()->GetBaseSize());
-			}
-			break;
-			case ELEMENT_TYPE_PTR:
-			case ELEMENT_TYPE_FNPTR:
-				// pointers may be dangerous, but they are
-				// copied without chang
-				break;
-			case ELEMENT_TYPE_STRING:
-			case ELEMENT_TYPE_CLASS: // objectrefs
-			case ELEMENT_TYPE_OBJECT:
-			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
-			case ELEMENT_TYPE_ARRAY:        // all other arrays
-			{
-				void *pSrc = *(void **)((char*)src + offset);
-				if (pSrc != nullptr)
-				{
-
-					void** rdst = (void**)((char*)dst + offset);
-					// because ArenaMarshal can trigger a GC
-					// it is necessary to put memory in a GC
-					// safe state first.
-					void* clone = ArenaMarshal((void*)rdst, pSrc);
-					*rdst = clone;
-					if (!ISARENA(rdst))
-					{
-#ifdef _DEBUG
-						Thread::ObjectRefAssign(rdst);
-#endif
-						ErectWriteBarrier((Object**)rdst, (Object*)clone);
-					}
-					//Log("ArenaMarshal ptr", (size_t)rdst, (size_t)clone);
-				}
-			}
-			break;
-			default:
-				break;
-
-			}
-		}
-
-		pCurrMT = pCurrMT->GetParentMethodTable();
-	}
-}
-
-void ArenaManager::CloneClass1(void* dst, Object* src, PTR_MethodTable mt, int ioffset, size_t classSize)
-{
-#if DEBUG
-	Log((char*)mt->GetDebugClassName(), 0, 0, "cloneclass");
-#endif
-
-
-	auto pCurrMT = mt;
-	while (pCurrMT)
-	{
-		DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
-		if (numInstanceFields == 0) break;
-
-		FieldDesc *pSrcFields = pCurrMT->GetApproxFieldDescListRaw();
-		if (pSrcFields == nullptr) break;
-
-		for (DWORD i = 0; i < numInstanceFields; i++)
-		{
-			FieldDesc f = pSrcFields[i];
-			if (f.IsStatic()) continue;
-			CorElementType type = f.GetFieldType();
-			DWORD offset = f.GetOffset() + ioffset;
-			if (pSrcFields[i].IsNotSerialized())
-			{
-				Log("IsNotSerialized", offset);
-				continue;
-			}
-
-			if (offset >= classSize)
-			{
-				continue;
-			}
-
-#ifdef DEBUG
-			LPCUTF8 szFieldName = f.GetDebugName();
-			//Log((char*)szFieldName, offset, 0, "field");
-#endif
-
-
-			switch (type) {
-
-			case ELEMENT_TYPE_VALUETYPE:
-			{
-
-				TypeHandle th = LoadExactFieldType(&pSrcFields[i], mt, GetAppDomain());
-				CloneClass1((char*)dst + offset, (Object*)((char*)src + offset), th.AsMethodTable(), 0, th.AsMethodTable()->GetBaseSize());
-			}
-			break;
-			case ELEMENT_TYPE_PTR:
-			case ELEMENT_TYPE_FNPTR:
-				// pointers may be dangerous, but they are
-				// copied without chang
-				break;
-			case ELEMENT_TYPE_STRING:
-			case ELEMENT_TYPE_CLASS: // objectrefs
-			case ELEMENT_TYPE_OBJECT:
-			case ELEMENT_TYPE_SZARRAY:      // single dim, zero
-			case ELEMENT_TYPE_ARRAY:        // all other arrays
-			{
-				void *pSrc = *(void **)((char*)src + offset);
-				if (pSrc != nullptr)
-				{
-
-					void** rdst = (void**)((char*)dst + offset);
-					// because ArenaMarshal can trigger a GC
-					// it is necessary to put memory in a GC
-					// safe state first.
-					*rdst = nullptr;
-					//Log("memwriteptr", (size_t)rdst, (size_t)clone);
-				}
-			}
-			break;
-			default:
-				break;
-			}
-		}
-
-		pCurrMT = pCurrMT->GetParentMethodTable();
-	}
-}
-
-
 
 #ifdef LOGGING
 void ArenaManager::VerifyObject(Object* o, MethodTable* pMT0)
@@ -835,7 +744,7 @@ void ArenaManager::VerifyObject(Object* o, MethodTable* pMT0)
 	if (o == nullptr) return;
 	if (verifiedObjects.contains(o))
 	{
-		
+
 		return;
 	}
 	verifiedObjects.add(o);
@@ -857,11 +766,11 @@ void ArenaManager::VerifyObject(Object* o, MethodTable* pMT0)
 
 	if (pMT->IsArray())
 	{
-		VerifyArray(o,pMT);
+		VerifyArray(o, pMT);
 	}
 	else
 	{
-		VerifyClass(o,pMT);
+		VerifyClass(o, pMT);
 	}
 }
 
@@ -906,9 +815,9 @@ void ArenaManager::VerifyClass(Object* o, MethodTable* pMT)
 			case ELEMENT_TYPE_VALUETYPE:
 			{
 				TypeHandle th = LoadExactFieldType(&pSrcFields[i], pCurrMT, GetAppDomain());
-				
+
 				Object* o2 = (Object*)((char*)o + offset);
-				VerifyObject(o2,th.AsMethodTable());
+				VerifyObject(o2, th.AsMethodTable());
 			}
 			break;
 			case ELEMENT_TYPE_PTR:
@@ -930,16 +839,16 @@ void ArenaManager::VerifyClass(Object* o, MethodTable* pMT)
 			default:
 				break;
 			}
-		}
+			}
 
 		pCurrMT = pCurrMT->GetParentMethodTable();
+		}
 	}
-}
 
 void ArenaManager::VerifyArray(Object* o, MethodTable* pMT)
 {
 	int ioffset = 16;
-	
+
 	TypeHandle arrayTypeHandle = ArrayBase::GetTypeHandle(pMT);
 	ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
 	TypeHandle ty = ar->GetArrayElementTypeHandle();
@@ -965,7 +874,7 @@ void ArenaManager::VerifyArray(Object* o, MethodTable* pMT)
 		{
 			Object* o2 = *(Object**)((char*)o + i);
 			VerifyObject(o2);
-		}	
+		}
 	}
 
 	break;
@@ -987,7 +896,7 @@ void ArenaManager::VerifyArray(Object* o, MethodTable* pMT)
 		{
 			Object* o2 = *(Object**)((char*)o + i);
 			VerifyObject(o2);
-		}	
+		}
 		break;
 	default:
 		break;

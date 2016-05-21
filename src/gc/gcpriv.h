@@ -170,7 +170,6 @@ void GCLogConfig (const char *fmt, ... );
 #define SIMPLE_DPRINTF
 #endif
 #ifdef SIMPLE_DPRINTF
-#error SIMPLE_DPRINTF
 #endif
 #define NUMBERGENERATIONS   4               //Max number of generations
 

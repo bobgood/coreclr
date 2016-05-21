@@ -118,25 +118,40 @@ ifdef WRITE_BARRIER_CHECK
     NoShadow:
 endif
 
-        mov     rax, rdx
+		bt      rcx,42
+		jnc     targetNotArena5
+		bt      rdx,42
+		jnc      marshal5
+
+		; both arena - check if same buffer
+		mov     rax,rdx
 		xor     rax,rcx
-		mov   r10,1
-		shl   r10,42
-		test   rax, r10
-		jnz    MixedArenaGC
-;		bt      rax,42
-;		jc	    MixedArenaGC
-		test   rcx, r10
-		jz   NotMixedArenaGC
-;	    bt      rcx,42
-;		jnc      NotMixedArenaGC
-		shr     rax,32
-		and      eax,3ffh
-		jne     MixedArenaGC
-		mov     [rcx], rdx
+		shr     rax,20
+		and     rax,3fffffh
+		je      nomarshalarena5
+
+		; check if buffers come from same arena
+		mov     rax,rdx
+		shr     rax,20
+		and     rax,3fffffh
+		mov     r8d,1
+		shl     r8,42
+		push	rbx
+		mov     bx,[r8+2*rax]
+		mov     rax,rcx
+		shr     rax,20
+		and     rax,3fffffh
+		cmp     bx,[r8+2*rax]
+		pop		rbx
+		jne     marshal5
+nomarshalarena5:
+		mov     [rcx],rdx
 		ret
 
-NotMixedArenaGC:
+targetNotArena5:  
+		bt		rdx,42
+		jc		marshal5
+
         ; Do the move. It is correct to possibly take an AV here, the EH code
         ; figures out that this came from a WriteBarrier and correctly maps it back
         ; to the managed method which called the WriteBarrier (see setup in
@@ -148,6 +163,8 @@ ifdef WRITE_BARRIER_CHECK
     ; as the shadow GC so we want to jump over the real write immediately above
     DoneShadow:
 endif
+card5:
+		mov rax,rdx
 
         ; See if we can just quick out
         cmp     rax, [g_ephemeral_low]
@@ -169,7 +186,7 @@ endif
         mov     byte ptr [rcx], 0FFh
         ret
 
-	MixedArenaGC:
+marshal5:
 		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
@@ -181,13 +198,13 @@ endif
 		call                rax
 
         add                 rsp, 20h
-
-		
         POP_CALLEE_SAVED_REGISTERS
-		pop     rcx
+		pop rcx
 		mov     [rcx], rax
+		bt      rcx,42
+		mov     rdx,rax
+		jnc     card5
 		ret
-
 
     align 16
     Exit:

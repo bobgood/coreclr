@@ -90,7 +90,7 @@ targetNotArena2:
 
         nop ; padding for alignment of constant
 
-		
+card2:
 PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_Lower
         cmp     rdx, 0F0F0F0F0h
         jb      Exit
@@ -122,6 +122,9 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
         POP_CALLEE_SAVED_REGISTERS
 		pop rcx
 		mov     [rcx], rax
+		bt      rcx,42
+		mov     rdx,rax
+		jnc     card2
 		ret
 
     align 16
@@ -179,6 +182,7 @@ targetNotArena3:
 		nop
 		nop
 
+card3:
         ; Can't compare a 64 bit immediate, so we have to move it into a
         ; register.  Value of this immediate will be patched at runtime.
 PATCH_LABEL JIT_WriteBarrier_PreGrow64_Patch_Label_Lower
@@ -217,6 +221,9 @@ lmarshal3:
         POP_CALLEE_SAVED_REGISTERS
 		pop rcx
 		mov     [rcx], rax
+		bt      rcx,42
+		mov     rdx,rax
+		jnc     card3
 		ret
 
     align 16
@@ -372,7 +379,7 @@ targetNotArena5:
         nop ; padding for alignment of constant
 
         ; Check the lower and upper ephemeral region bounds
-
+card5:
 PATCH_LABEL JIT_WriteBarrier_PostGrow32_PatchLabel_Lower
         cmp     rdx, 0F0F0F0F0h
         jb      Exit
@@ -412,6 +419,9 @@ marshal5:
         POP_CALLEE_SAVED_REGISTERS
 		pop rcx
 		mov     [rcx], rax
+		mov     rdx,rax
+		bt      rcx,42
+		jnc     card5
 		ret
 
 
@@ -473,6 +483,7 @@ targetNotArena6:
 		nop
 		nop
 
+card6:
 PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_CheckCardTable
         cmp     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         jne     UpdateCardTable
@@ -500,6 +511,9 @@ marshal6:
         POP_CALLEE_SAVED_REGISTERS
 		pop rcx
 		mov     [rcx], rax
+		mov     rdx,rax
+		bt      rcx,42
+		jnc     card6
 		ret
 
 
@@ -559,6 +573,7 @@ targetNotArena7:
 		nop
 		nop
 
+card7:
 PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
         mov     rax, 0F0F0F0F0F0F0F0F0h
 
@@ -589,6 +604,9 @@ marshal7:
         POP_CALLEE_SAVED_REGISTERS
 		pop rcx
 		mov     [rcx], rax
+		bt      rcx,42
+		mov     rdx,rax
+		jnc     card7
 		ret
 
 NESTED_END_MARKED JIT_WriteBarrier_SVR64, _TEXT

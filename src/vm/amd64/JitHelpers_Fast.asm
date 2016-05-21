@@ -515,6 +515,7 @@ targetNotArena1:
 
         nop; padding for alignment of constant 
 
+		card1:
         ; Can't compare a 64 bit immediate, so we have to move them into a
         ; register.  Values of these immediates will be patched at runtime.
         ; By using two registers we can pipeline better.  Should we decide to use
@@ -566,6 +567,9 @@ targetNotArena1:
         POP_CALLEE_SAVED_REGISTERS
 		pop rcx
 		mov     [rcx], rax
+		mov     rdx,rax
+		bt      rcx,42
+		jnc     card1
 		ret
 
 

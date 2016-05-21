@@ -54,18 +54,27 @@ private:
 	static void ReferenceId(int id);
 
 	// Gets the allocator at the top of the stack
-	inline static void* GetArena();
+	static void* ArenaManager::GetArena()
+	{
+		return GetArenaStack().Current();
+	}
+	
+	static size_t Align(size_t nbytes)
+	{
+#ifdef AMD64
+		return (nbytes + 7) & ~7;
+#else
+		return (nbytes + 3) & ~3;
+#endif
+	}
 
-	// Address alignment copied from "gcpriv.h" 
-	inline static size_t Align(size_t nbytes, int alignment = 7);
+	static void* AllocatorFromAddress(void * addr)
+	{
+		ArenaId id = ArenaVirtualMemory::ArenaNumber(addr);
+		if (id == -1) return nullptr;
+		return arenaById[id];
+	}
 
-	inline static void* AllocatorFromAddress(void * addr);
-
-	static void CloneArray(void* dst, Object* src, PTR_MethodTable pMT, int ioffset, size_t size);
-
-	static void CloneClass(void* dst, Object* src, PTR_MethodTable mt, int ioffset, size_t classSize);
-
-	static void CloneClass1(void* dst, Object* src, PTR_MethodTable mt, int ioffset, size_t classSize);
 
 	static void RegisterForFinalization(Object* o, size_t size);
 
@@ -102,9 +111,34 @@ public:
 
 	__declspec(noinline)
 		static void CheckAll();
+
 	// system code (i.e. JIT) that runs in the user thread should not use arenas.
-	static void PushGC();
-	static void Pop();
+	static void PushGC()
+	{
+		GetArenaStack().Push(nullptr);
+	}
+
+	static void Pop() {
+		void* allocator = GetArenaStack().Pop();
+		if (allocator != nullptr)
+		{
+			DereferenceId(ArenaVirtualMemory::ArenaNumber(allocator));
+		}
+	}
+
+	static void PushGC(Thread* thread)
+	{
+		GetArenaStack(thread).Push(nullptr);
+	}
+
+	static void Pop(Thread* thread) {
+		void* allocator = GetArenaStack(thread).Pop();
+		if (allocator != nullptr)
+		{
+			DereferenceId(ArenaVirtualMemory::ArenaNumber(allocator));
+		}
+	}
+
 
 	static void* ArenaMarshal(void*, void*);
 
@@ -117,9 +151,6 @@ public:
 		return a == 0;
 	}
 
-	// Deep clones the src object, and returns a pointer.  The clone is done into the allocator
-	// that holds the object target.
-	static void* Marshal(void*src, void*target);
 
 	static void VerifyObject(Object* o, MethodTable* pMT = nullptr);
 	static void VerifyClass(Object* o, MethodTable* pMT = nullptr);
@@ -130,7 +161,42 @@ public:
 		return GetThread()->m_arenaStack;
 	}
 
+	static ArenaStack& GetArenaStack(Thread* thread)
+	{
+		return thread->m_arenaStack;
+	}
+
 	static void* GetBuffer(ArenaId arenaId, size_t len = ArenaVirtualMemory::bufferSize);
+
+#if defined(BIT64)
+	// Card byte shift is different on 64bit.
+#define card_byte_shift     11
+#else
+#define card_byte_shift     10
+#endif
+
+#define card_byte(addr) (((size_t)(addr)) >> card_byte_shift)
+
+	// to guarantee inline, this code is cloned from GCSample
+	static void ErectWriteBarrier(Object ** dst, Object * ref)
+	{
+#if !defined(DACCESS_COMPILE)
+		// if the dst is outside of the heap (unboxed value classes) then we
+		//      simply exit
+		if (((uint8_t*)dst < g_lowest_address) || ((uint8_t*)dst >= g_highest_address))
+			return;
+
+		if ((uint8_t*)ref >= g_ephemeral_low && (uint8_t*)ref < g_ephemeral_high)
+		{
+			// volatile is used here to prevent fetch of g_card_table from being reordered 
+			// with g_lowest/highest_address check above. See comment in code:gc_heap::grow_brick_card_tables.
+			uint8_t* pCardByte = (uint8_t *)*(volatile uint8_t **)(&g_card_table) + card_byte((uint8_t *)dst);
+			if (*pCardByte != 0xFF)
+				*pCardByte = 0xFF;
+		}
+#endif
+	}
+
 };
 
 

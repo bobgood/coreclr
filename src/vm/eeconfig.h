@@ -1048,7 +1048,7 @@ private: //----------------------------------------------------------------
     int  iGCHeapVerify;
 #endif
 
-#ifdef TRACE_GC
+#ifdef _DEBUG
 
     int  iGCtraceStart;
     int  iGCtraceEnd;

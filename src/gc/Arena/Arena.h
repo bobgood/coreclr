@@ -156,7 +156,7 @@ public:
 		SpinLock(m_lock0);
 		m_buffers[m_bufferNext].m_addr = (char*)addr;
 		m_buffers[m_bufferNext++].m_len = len;
-		assert(m_nextAddress < m_arenaEnd);
+		assert((size_t)addr < m_arenaEnd);
 		SpinUnlock(m_lock0);
 		::ArenaManager::Log("VirtualAlloc", (size_t)addr, len,nullptr,m_id);		
 		return (char*)addr;

@@ -13,11 +13,13 @@ class hashtable
 	KVP* table;
 	int slotCount;
 	long lock;
+	static const int tries = 5;
 public:
-	set(int slots=100)
+	hashtable(int slots=100)
 	{
+		lock = 0;
 		slotCount = slots;
-		table = new size_t[slots];
+		table = new KVP[slots];
 		for (int i = 0; i < slots; i++) table[i].key = 0;
 	}
 
@@ -29,24 +31,26 @@ public:
 	__declspec(noinline)
 	void add(size_t k, size_t v)
 	{
+		assert(k != 0);
 		retry:
 		SpinLock(lock);
-		int key = (n>>3)%slotCount;
+		int key = (k>>3)%slotCount;
 		int cnt = 0;
-		for (int i = key; cnt++ < 10; i = (i == slotCount - 1) ? 0 : i + 1)
+		for (int i = key; cnt++ < tries; i = (i == slotCount - 1) ? 0 : i + 1)
 		{
-			if (table[i].key == 0 || table[i].key == n)
+			if (table[i].key == 0 || table[i].key == k)
 			{
-				table[i].key = n;
+				table[i].key = k;
 				table[i].value = v;
 				SpinUnlock(lock);
 				return;
 			}
 		}
 
-		int s2 = slotCount * 2;
-		size_t*table2 = new size_t[s2];
-		for (int i = 0; i < s2; i++) table2[i] = 0;
+		int s2 = slotCount * 2 - 1;
+		KVP*table2 = new KVP[s2];
+		for (int i = 0; i < s2; i++) table2[i].key = 0;
+		for (int i = 0; i < s2; i++) table2[i].value = 0;
 		for (int i = 0; i < slotCount; i++)
 		{
 			size_t n = table[i].key;
@@ -55,9 +59,9 @@ public:
 			{
 				int key = (n>>3)%s2;
 				int cnt = 0;
-				for (int i = key; cnt < 10; i = (i == s2 - 1) ? 0 : i + 1)
+				for (int i = key; cnt < tries; i = (i == s2 - 1) ? 0 : i + 1)
 				{
-					if (table2[i] == 0 || table2[i] == n)
+					if (table2[i].key == 0 || table2[i].key == n)
 					{
 						table2[i].key = n;
 						table2[i].value = v;
@@ -67,7 +71,7 @@ public:
 
 			}
 		}
-
+		delete table;
 		table = table2;
 		slotCount = s2;
 		SpinUnlock(lock);
@@ -83,9 +87,32 @@ public:
 	}
 
 	
-	bool contains(void* n)
+	bool containskey(void* n)
 	{
-		return contains((size_t)n);
+		return containskey((size_t)n);
+	}
+
+	bool containskey(size_t n)
+	{
+		SpinLock(lock);
+		int key = (n >> 3) % slotCount;
+		int cnt = 0;
+		for (int i = key; cnt++ < tries; i = (i == slotCount - 1) ? 0 : i + 1)
+		{
+			if (table[i].key == n)
+			{
+				SpinUnlock(lock);
+				return true;
+			}
+			if (table[i].key == 0)
+			{
+				SpinUnlock(lock);
+				return false;
+			}
+		}
+
+		SpinUnlock(lock);
+		return false;
 	}
 
 	__declspec(noinline)
@@ -94,7 +121,7 @@ public:
 		SpinLock(lock);
 		int key = (n>>3)%slotCount;
 		int cnt = 0;
-		for (int i = key; cnt++ < 10; i = (i == slotCount - 1) ? 0 : i + 1)
+		for (int i = key; cnt++ < tries; i = (i == slotCount - 1) ? 0 : i + 1)
 		{
 			if (table[i].key == 0 || table[i].key == n)
 			{
@@ -115,7 +142,7 @@ public:
 		SpinLock(lock);
 		int key = (n >> 3) % slotCount;
 		int cnt = 0;
-		for (int i = key; cnt++ < 10; i = (i == slotCount - 1) ? 0 : i + 1)
+		for (int i = key; cnt++ < tries; i = (i == slotCount - 1) ? 0 : i + 1)
 		{
 			if (table[i].key == 0 || table[i].key == n)
 			{
@@ -147,6 +174,27 @@ private:
 
 void hashtable::Test()
 {
-	auto hashtable h = new hashtable();
+	hashtable h;
+	for (size_t i = 1; i < 1000; i++)
+	{
+		size_t k = i * 0x3408;
+		size_t v = i;
+		h.add(k, v);
+	}
+	
+	for (size_t i = 1; i < 1000; i++)
+	{
+		size_t k = i * 0x3408;
+		if (!h.containskey(k)) throw 0;
+		if (h.containskey(k - 1)) throw 0;
+		if (h[k] != i) throw 0;
+		h[k] = i + 1;
+	}
+
+	for (size_t i = 1; i < 1000; i++)
+	{
+		size_t k = i * 0x3408;
+		if (h[k] != i+1) throw 0;
+	}
 
 }

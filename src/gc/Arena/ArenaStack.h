@@ -15,14 +15,52 @@ public:
 	bool freezelog=false;
 
 public:
-	void* Current();
-	void Reset();
+	void* Current()
+	{
+		return current;
+	}
 
-	int Size();
+	void Reset()
+	{
+		size = 0;
+		current = nullptr;
+	}
 
-	void* operator[](int offset);
+	int Size()
+	{
+		return size;
+	}
 
-	void Push(void* v);
-	void* Pop();
+
+	void* operator[](int offset)
+	{
+		if (offset >= arenaStackDepth) return nullptr;
+		//assert(offset >= 0 && offset < size);
+		return stack[offset];
+	}
+
+	void Push(void* v)
+	{
+
+		current = v;
+		if (size >= arenaStackDepth)
+		{
+			assert(v == nullptr);
+			size++;
+		}
+		else {
+			stack[size++] = v;
+		}
+	}
+
+	void* Pop()
+	{
+		DWORD written;
+		assert(size > 0);
+		auto ret = operator[](--size);
+		if (size == 0) current = nullptr;
+		current = operator[](size - 1);
+		return ret;
+	}
 };
 
