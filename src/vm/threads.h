@@ -182,7 +182,7 @@ typedef DPTR(PTR_ThreadLocalBlock) PTR_PTR_ThreadLocalBlock;
 #include "threaddebugblockinginfo.h"
 #include "interoputil.h"
 #include "eventtrace.h"
-#include "../gc/Arena/ArenaStack.h"
+#include "../gc/Arena.h"
 
 #ifdef CROSSGEN_COMPILE
 
@@ -7655,7 +7655,7 @@ private:
 // 1) Call HasStarted() before calling any ManagedThreadBase_* routine.
 // 2) Define a ManagedThreadBase_* routine for your scenario and declare it below.
 // 3) Always perform any AD transitions through the ManagedThreadBase_* mechanism.
-// 4) Allow the ManagedThreadBase_* mechanism to perform all your exception handling, including
+// 4) Allow the ManagedThreadBase_* mechanism t perform all your exception handling, including
 //    dispatching of unhandled exception events, deciding what to swallow, etc.
 // 5) If you must separate your base thread proc behavior from your AD transitioning behavior,
 //    define a second ManagedThreadADCall_* helper and declare it below.

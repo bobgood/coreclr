@@ -18,7 +18,7 @@
 #include "eetwain.h"
 #include "eeconfig.h"
 #include "gc.h"
-#include "..\gc\Arena\arenaManager.h"
+#include "..\gc\Arena.h"
 #include "corhost.h"
 #include "threads.h"
 #include "fieldmarshaler.h"

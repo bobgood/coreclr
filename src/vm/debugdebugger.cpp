@@ -210,7 +210,7 @@ FCIMPL0(void, DebugDebugger::Break)
     }
     else
     {   
-#ifndef FEATURE_CORECLR        
+#ifndef FEATURE_CORECLR       
         // No debugger attached -- Watson up.
 		Memroy
         // The HelperMethodFrame knows how to get the return address.

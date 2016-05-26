@@ -24,7 +24,7 @@
 #include "securitymeta.h"
 #include "dllimport.h"
 #include "gc.h"
-#include "../gc/Arena/arenaManager.h"
+#include "../gc/Arena.h"
 #include "comdelegate.h"
 #include "jitperf.h" // to track jit perf
 #include "corprof.h"

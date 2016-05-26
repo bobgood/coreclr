@@ -310,7 +310,7 @@ FRAME_TYPE_NAME(SecurityContextFrame)
 #include "gms.h"
 #include "threads.h"
 #include "callingconvention.h"
-#include "..\gc\Arena\ArenaManager.h"
+#include "..\gc\Arena.h"
 
 // Forward references
 class Frame;

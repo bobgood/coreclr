@@ -4,7 +4,7 @@
 
 
 #include "common.h"
-#include "Arena/arenaManager.h"
+#include "Arena.h"
 
 
 #include "gcenv.h"

@@ -29,7 +29,7 @@
 #include "winwrap.h"
 #include "gc.h"
 // Hack
-#include "../gc/Arena/arenaManager.h"
+#include "../gc/Arena.h"
 #include "fcall.h"
 #include "invokeutil.h"
 #include "eeconfig.h"
