@@ -20,7 +20,7 @@ include AsmMacros.inc
 include asmconstants.inc
 
 extern JIT_InternalThrow:proc
-ArenaMarshal equ ?ArenaMarshal@ArenaManager@@SAPEAXPEAX0@Z
+ArenaMarshal equ ?ArenaMarshal@ArenaManager@@SAXPEAX0@Z
 extern ArenaMarshal:proc
 MIN_SIZE equ 28h
 
@@ -82,12 +82,16 @@ NESTED_ENTRY JIT_WriteBarrier_PreGrow32, _TEXT
 nomarshalarena2:
 		mov     [rcx],rdx
 		ret
+marshal2:
+        jmp     lmarshal2
 
 targetNotArena2:  
 		bt		rdx,42
 		jc		marshal2
         mov     [rcx], rdx
 
+        nop ; padding for alignment of constant
+        nop ; padding for alignment of constant
         nop ; padding for alignment of constant
 
 card2:
@@ -107,8 +111,7 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
     UpdateCardTable:
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
-	marshal2:
-		push rcx
+	lmarshal2:
         PUSH_CALLEE_SAVED_REGISTERS
 
         alloc_stack         20h
@@ -120,11 +123,6 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow32_PatchLabel_CardTable_Update
 
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		pop rcx
-		mov     [rcx], rax
-		bt      rcx,42
-		mov     rdx,rax
-		jnc     card2
 		ret
 
     align 16
@@ -206,8 +204,7 @@ PATCH_LABEL JIT_WriteBarrier_PreGrow64_Patch_Label_CardTable
     UpdateCardTable:
         mov     byte ptr [rcx + rax], 0FFh
         ret
-lmarshal3:
-		push rcx
+lmarshal3:		
         PUSH_CALLEE_SAVED_REGISTERS
 
         alloc_stack         20h
@@ -215,15 +212,18 @@ lmarshal3:
         END_PROLOGUE
     
         mov                 rax, ArenaMarshal
+		bt rsp,3
+		jc odd3
+		
 		call                rax
-
+        jmp done3
+	odd3:
+		push rax
+		call rax
+		pop rax
+	done3:
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		pop rcx
-		mov     [rcx], rax
-		bt      rcx,42
-		mov     rdx,rax
-		jnc     card3
 		ret
 
     align 16
@@ -265,6 +265,8 @@ NESTED_ENTRY JIT_WriteBarrier_PostGrow64, _TEXT
 nomarshalarena4:
 		mov     [rcx],rdx
 		ret
+marshal4:
+        jmp     lmarshal4
 
 targetNotArena4:  
 		bt		rdx,42
@@ -277,7 +279,9 @@ targetNotArena4:
 
 		NOP ; padding for alignment of constant
 		NOP ; padding for alignment of constant
-
+        nop ; padding for alignment of constant
+        nop ; padding for alignment of constant
+ 
         ; Can't compare a 64 bit immediate, so we have to move them into a
         ; register.  Values of these immediates will be patched at runtime.
         ; By using two registers we can pipeline better.  Should we decide to use
@@ -290,8 +294,8 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow64_Patch_Label_Lower
         cmp     rdx, rax
         jb      Exit
 
-        nop ; padding for alignment of constant
-
+       nop ; padding for alignment of constant
+ 
 PATCH_LABEL JIT_WriteBarrier_PostGrow64_Patch_Label_Upper
         mov     r8, 0F0F0F0F0F0F0F0F0h
 
@@ -313,7 +317,7 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow64_Patch_Label_CardTable
         mov     byte ptr [rcx + rax], 0FFh
         ret
 
-marshal4:
+	lmarshal4:
 		mov rbx,rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
@@ -322,11 +326,18 @@ marshal4:
         END_PROLOGUE
     
 		mov                 rax,ArenaMarshal
-        call                (rax)
-
+		bt rsp,3
+		jc odd4
+		
+		call                rax
+		jmp done4
+	odd4:
+		push rax
+		call rax
+		pop rax
+	done4:
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		mov     [rbx], rax
 		ret
 
 
@@ -334,6 +345,7 @@ marshal4:
     Exit:
         REPRET
 NESTED_END_MARKED JIT_WriteBarrier_PostGrow64, _TEXT
+
 
 NESTED_ENTRY JIT_WriteBarrier_PostGrow32, _TEXT
         align 4
@@ -366,6 +378,8 @@ NESTED_ENTRY JIT_WriteBarrier_PostGrow32, _TEXT
 nomarshalarena5:
 		mov     [rcx],rdx
 		ret
+marshal5:
+        jmp     lmarshal5
 
 targetNotArena5:  
 		bt		rdx,42
@@ -377,6 +391,8 @@ targetNotArena5:
         mov     [rcx], rdx
 
         nop ; padding for alignment of constant
+        nop ; padding for alignment of constant
+        nop ; padding for alignment of constant
 
         ; Check the lower and upper ephemeral region bounds
 card5:
@@ -384,7 +400,9 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow32_PatchLabel_Lower
         cmp     rdx, 0F0F0F0F0h
         jb      Exit
 
-        NOP_3_BYTE ; padding for alignment of constant
+        nop ; padding for alignment of constant
+        nop ; padding for alignment of constant
+        nop ; padding for alignment of constant
 
 PATCH_LABEL JIT_WriteBarrier_PostGrow32_PatchLabel_Upper
         cmp     rdx, 0F0F0F0F0h
@@ -404,8 +422,7 @@ PATCH_LABEL JIT_WriteBarrier_PostGrow32_PatchLabel_UpdateCardTable
     UpdateCardTable:
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
-marshal5:
-		push rcx
+lmarshal5:
         PUSH_CALLEE_SAVED_REGISTERS
 
         alloc_stack         20h
@@ -417,11 +434,6 @@ marshal5:
 
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		pop rcx
-		mov     [rcx], rax
-		mov     rdx,rax
-		bt      rcx,42
-		jnc     card5
 		ret
 
 
@@ -429,6 +441,7 @@ marshal5:
     Exit:
         REPRET
 NESTED_END_MARKED JIT_WriteBarrier_PostGrow32, _TEXT
+
 
 
 NESTED_ENTRY JIT_WriteBarrier_SVR32, _TEXT
@@ -469,6 +482,8 @@ NESTED_ENTRY JIT_WriteBarrier_SVR32, _TEXT
 nomarshalarena6:
 		mov     [rcx],rdx
 		ret
+marshal6:
+        jmp     lmarshal6
 
 targetNotArena6:  
 		bt		rdx,42
@@ -480,8 +495,6 @@ targetNotArena6:
         mov     [rcx], rdx
 
         shr     rcx, 0Bh
-		nop
-		nop
 
 card6:
 PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_CheckCardTable
@@ -496,8 +509,7 @@ PATCH_LABEL JIT_WriteBarrier_SVR32_PatchLabel_UpdateCardTable
         mov     byte ptr [rcx + 0F0F0F0F0h], 0FFh
         ret
 
-marshal6:
-		push rcx
+lmarshal6:
         PUSH_CALLEE_SAVED_REGISTERS
 
         alloc_stack         20h
@@ -509,11 +521,6 @@ marshal6:
 
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		pop rcx
-		mov     [rcx], rax
-		mov     rdx,rax
-		bt      rcx,42
-		jnc     card6
 		ret
 
 
@@ -556,6 +563,8 @@ NESTED_ENTRY JIT_WriteBarrier_SVR64, _TEXT
 nomarshalarena7:
 		mov     [rcx],rdx
 		ret
+marshal7:
+        jmp     lmarshal7
 
 targetNotArena7:  
 		bt		rdx,42
@@ -566,8 +575,6 @@ targetNotArena7:
         ; InitializeExceptionHandling, vm\exceptionhandling.cpp).
         mov     [rcx], rdx
 
-		nop
-		nop
 		nop
 		nop
 		nop
@@ -589,8 +596,7 @@ PATCH_LABEL JIT_WriteBarrier_SVR64_PatchLabel_CardTable
         mov     byte ptr [rcx + rax], 0FFh
         ret
 
-marshal7:
-		push rcx
+lmarshal7:
         PUSH_CALLEE_SAVED_REGISTERS
 
         alloc_stack         20h
@@ -598,18 +604,22 @@ marshal7:
         END_PROLOGUE
     
         mov                 rax, ArenaMarshal
+		bt rsp,3
+		jc odd7
+		
 		call                rax
-
+        jmp done7
+	odd7:
+		push rax
+		call rax
+		pop rax
+	done7:
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		pop rcx
-		mov     [rcx], rax
-		bt      rcx,42
-		mov     rdx,rax
-		jnc     card7
 		ret
 
 NESTED_END_MARKED JIT_WriteBarrier_SVR64, _TEXT
+
 
         end
 
