@@ -1431,10 +1431,10 @@ void Object::SetOffsetObjectRef(DWORD dwOffset, size_t dwValue)
 * Write Barrier Helper
 *
 * Use this function to assign an object reference into
-* another object.
+* another object. 
 *
 * It will set the appropriate GC Write Barrier data
-*/
+*/ 
 
 #if CHECK_APP_DOMAIN_LEAKS
 void SetObjectReferenceChecked(OBJECTREF *dst, OBJECTREF ref, AppDomain *pAppDomain)
@@ -1463,9 +1463,7 @@ void SetObjectReferenceUnchecked(OBJECTREF *dst, OBJECTREF ref)
 	Object* oref = OBJECTREFToObject(ref);
 	if (ISARENA(dst) ? !ISSAMEARENA(dst, oref) : ISARENA(oref))
 	{
-		Object* ref2 = (Object*)::ArenaManager::ArenaMarshal(dst, oref);
-
-		VolatileStore<Object*>((Object**)dst, ref2);
+		::ArenaManager::ArenaMarshal(dst, oref);
 		return;
 	}
 

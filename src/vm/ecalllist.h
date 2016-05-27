@@ -152,7 +152,7 @@ FCFuncStart(gMessageFuncs)
     FCFuncElement("OutToUnmanagedDebugger", CMessage::DebugOut)
     FCFuncElement("Dispatch", CMessage::Dispatch)
 FCFuncEnd()
-#endif //FEATURE_REMOTING
+#endif //FEATURE_REMOTING 
 
 #ifdef FEATURE_REMOTING
 FCFuncStart(gChannelServicesFuncs)
@@ -1003,10 +1003,10 @@ FCFuncStart(gAppDomainFuncs)
     FCFuncElement("IsDomainIdValid", AppDomainNative::IsDomainIdValid)
     FCFuncElement("nApplyPolicy", AppDomainNative::nApplyPolicy)
 #endif // FEATURE_REMOTING
-//#ifdef FEATURE_CORECLR    
+#ifdef FEATURE_CORECLR    
     QCFuncElement("nSetupBindingPaths", AppDomainNative::SetupBindingPaths)
     QCFuncElement("nSetNativeDllSearchDirectories", AppDomainNative::SetNativeDllSearchDirectories)
-//#endif    
+#endif    
     FCFuncElement("IsFinalizingForUnload", AppDomainNative::IsFinalizingForUnload)
     FCFuncElement("PublishAnonymouslyHostedDynamicMethodsAssembly", AppDomainNative::PublishAnonymouslyHostedDynamicMethodsAssembly)
 #ifdef FEATURE_APPDOMAIN_RESOURCE_MONITORING

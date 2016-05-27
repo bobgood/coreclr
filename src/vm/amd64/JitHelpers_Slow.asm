@@ -58,7 +58,7 @@ extern JIT_GetSharedNonGCStaticBase_Helper:proc
 extern JIT_GetSharedGCStaticBase_Helper:proc
 
 extern JIT_InternalThrow:proc
-ArenaMarshal equ ?ArenaMarshal@ArenaManager@@SAPEAXPEAX0@Z
+ArenaMarshal equ ?ArenaMarshal@ArenaManager@@SAXPEAX0@Z
 extern ArenaMarshal:proc
 
 ; These should be in AsmConstants.inc, but I could not figure out how...
@@ -187,7 +187,6 @@ card5:
         ret
 
 marshal5:
-		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
         alloc_stack         20h
@@ -199,11 +198,6 @@ marshal5:
 
         add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		pop rcx
-		mov     [rcx], rax
-		bt      rcx,42
-		mov     rdx,rax
-		jnc     card5
 		ret
 
     align 16

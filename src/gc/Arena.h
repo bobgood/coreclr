@@ -90,7 +90,8 @@ public:
 	void *Pop()
 	{
 		DWORD written;
-		assert(m_size-- > 0);
+		m_size--;
+		assert(m_size > 0);
 		if (m_size == 0)
 		{
 			m_current = nullptr;		

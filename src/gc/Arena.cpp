@@ -1,7 +1,7 @@
 
-#include "../common.h"
+#include "common.h"
 #include "arena.h"
-#include "../object.h"
+#include "object.h"
 #include <assert.h>
 #include <windows.h>
 #include <tchar.h>

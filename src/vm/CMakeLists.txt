@@ -54,7 +54,7 @@ endif(CLR_CMAKE_PLATFORM_UNIX)
 set(VM_SOURCES_DAC_AND_WKS_COMMON
     appdomain.cpp
     array.cpp
-    Arena.cpp
+    ../gc/Arena.cpp
     assembly.cpp
     baseassemblyspec.cpp
     binder.cpp

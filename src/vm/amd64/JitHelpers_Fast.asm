@@ -47,7 +47,7 @@ extern JITutil_ChkCastInterface:proc
 extern JITutil_IsInstanceOfInterface:proc
 extern JITutil_ChkCastAny:proc
 extern JITutil_IsInstanceOfAny:proc
-ArenaMarshal equ ?ArenaMarshal@ArenaManager@@SAPEAXPEAX0@Z
+ArenaMarshal equ ?ArenaMarshal@ArenaManager@@SAXPEAX0@Z
 extern ArenaMarshal:proc
 
 ;EXTERN_C Object* JIT_IsInstanceOfClass(MethodTable* pMT, Object* pObject);
@@ -502,7 +502,8 @@ endif
 nomarshalarena1:
 		mov     [rcx],rdx
 		ret
-
+marshal1:
+        jmp     lmarshal1
 targetNotArena1:
 		bt		rdx,42
 		jc		marshal1
@@ -549,9 +550,8 @@ targetNotArena1:
         mov     byte ptr [rcx + rax], 0FFh
         ret
 
-		marshal1:
+	lmarshal1:
 
-		push rcx
         PUSH_CALLEE_SAVED_REGISTERS
 
         alloc_stack         20h
@@ -560,16 +560,18 @@ targetNotArena1:
 		
     
         mov                 rax, ArenaMarshal
-		call                rax
-
-        add                 rsp, 20h
+		bt rsp,3
+		jc odd1
 		
+		call                rax
+		jmp done1
+	odd1:
+		push rax
+		call rax
+		pop rax
+	done1:
+        add                 rsp, 20h
         POP_CALLEE_SAVED_REGISTERS
-		pop rcx
-		mov     [rcx], rax
-		mov     rdx,rax
-		bt      rcx,42
-		jnc     card1
 		ret
 
 
@@ -577,7 +579,6 @@ targetNotArena1:
     Exit:
         REPRET
     ; make sure this guy is bigger than any of the other guys
-    align 16
         nop
         nop
         nop
@@ -594,7 +595,26 @@ targetNotArena1:
         nop
         nop
         nop
-LEAF_END_MARKED JIT_WriteBarrier, _TEXT
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+        nop
+  align 16
+
+
+NESTED_END_MARKED JIT_WriteBarrier, _TEXT
 
 ifndef FEATURE_IMPLICIT_TLS
 LEAF_ENTRY GetThread, _TEXT
