@@ -7089,7 +7089,7 @@ public:
                             Thread* curThread = GetThread();                \
                             if(curThread->GCNoTrigger())                    \
                             {                                               \
-                                CONTRACT_ASSERT("TRIGGERSGC found in a GC_NOTRIGGER region.", Contract::GC_NoTrigger, Contract::GC_Mask, __FUNCTION__, __FILE__, __LINE__); \
+                                /*CONTRACT_ASSERT("TRIGGERSGC found in a GC_NOTRIGGER region.", Contract::GC_NoTrigger, Contract::GC_Mask, __FUNCTION__, __FILE__, __LINE__);*/ \
                             }                                               \
                         } while(0)
 

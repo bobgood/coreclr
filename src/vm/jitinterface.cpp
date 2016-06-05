@@ -12744,7 +12744,9 @@ BOOL LoadDynamicInfoEntry(Module *currentModule,
                 // in the defining assembly.
                 bool mayNeedToSyncWithFixups = pInfoModule != currentModule;
 
+				START_NOT_ARENA_SECTION  // all embedded strings are first constructed into GC heap
                 result = (size_t) pInfoModule->ResolveStringRef(TokenFromRid(rid, mdtString), currentModule->GetDomain(), mayNeedToSyncWithFixups);
+				END_NOT_ARENA_SECTION
             }
         }
         break;

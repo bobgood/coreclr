@@ -251,12 +251,12 @@ inline void ClrDebugState::CheckOkayToThrow(__in_z const char *szFunction, __in_
 
     if (!CheckOkayToThrowNoAssert())
     {
-        CONTRACT_ASSERT("THROWS called in a NOTHROW region.",
-                        BaseContract::THROWS_No,
-                        BaseContract::THROWS_Mask,
-                        szFunction,
-                        szFile,
-                        lineNum);
+        //CONTRACT_ASSERT("THROWS called in a NOTHROW region.",
+        //                BaseContract::THROWS_No,
+        //                BaseContract::THROWS_Mask,
+        //                szFunction,
+        //                szFile,
+        //                lineNum);
     }
 }
 

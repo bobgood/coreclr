@@ -134,13 +134,13 @@ void EEContract::DoChecks(UINT testmask, __in_z const char *szFunction, __in_z c
                 {
                     if (!( (GCViolation|BadDebugState) & m_pClrDebugState->ViolationMask()))
                     {
-                        CONTRACT_ASSERT("GC_TRIGGERS encountered in a GC_NOTRIGGER scope",
-                                        Contract::GC_NoTrigger,
-                                        Contract::GC_Mask,
-                                        m_contractStackRecord.m_szFunction,
-                                        m_contractStackRecord.m_szFile,
-                                        m_contractStackRecord.m_lineNum
-                                        );
+                        //CONTRACT_ASSERT("GC_TRIGGERS encountered in a GC_NOTRIGGER scope",
+                        //                Contract::GC_NoTrigger,
+                        //                Contract::GC_Mask,
+                        //                m_contractStackRecord.m_szFunction,
+                        //                m_contractStackRecord.m_szFile,
+                        //                m_contractStackRecord.m_lineNum
+                        //                );
                     }
                 }
             }

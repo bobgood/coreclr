@@ -19,9 +19,11 @@
 // 400'00182108 Small buffer for use by the first ArenaThread.(If it is used up, a new 1MB buffer is created) 
 // 400'00200000 Either another arena, another buffer for an existing arena thread, or a large allocation (over 1MB)
 // 400'00300000 etc.
-//   ....
+//   .... 
 // 4ff'fff00000
  
+// read/write from the buffer table
+#define ARENALOOKUP(x) (((ArenaId*)ArenaManager::c_arenaBaseAddress)[x])
 
 
 TypeHandle LoadExactFieldType(FieldDesc *pFD, MethodTable *pEnclosingMT, AppDomain *pDomain);
@@ -631,7 +633,8 @@ public:
 		}
 
 		m_arena = arena;
-		m_next = next;
+		// The first 8 bytes are reserved, because CLR uses the word before the object
+		m_next = next+8;
 		m_end = end;
 		m_bufferSize = bufferSize;
 	}
@@ -639,13 +642,237 @@ public:
 	// Sets a new buffer to use for allocation
 	void SetBuffer(char* next, char* end)
 	{
-		m_next = next;
+		// The first 8 bytes are reserved, because CLR uses the word before the object
+		m_next = next+8;
 		m_end = end;
 	}
+
+	void RegisterForFinalization(Object* o, size_t size);
 
 	// Allocates memory for this ArenaThread
 	void *Allocate(size_t size);
 };
+
+//////////////////////////////////////////////
+// ArenaVirtualMemory
+//
+//////////////////////////////////////////////
+
+
+// This struct represents the global variables used by ArenaVirtualMemory
+struct ArenaVirtualMemoryState
+{
+	// The next unused slot in the buffer table
+	BufferId m_nextSlot;
+
+	// This first slot in the buffer table
+	BufferId m_startSlot;
+
+	// The last location probed for empties in the buffer table
+	BufferId m_circleNextSlot;
+
+	// Lock for buffer table
+	LONG m_bufferTableLock;
+
+	//Number of buffers that are virutally allocated, but are nut in use.
+	LONG m_numberOfRecycleBuffers;
+};
+
+class ArenaVirtualMemory
+{
+public:
+
+private:
+	static const size_t maxBuffers = ArenaManager::c_arenaBaseSize / ArenaManager::c_bufferReserveSize;
+	static const ArenaId recycled = (ArenaId)-1;
+	static const ArenaId empty = (ArenaId)-2;
+
+
+	static ArenaVirtualMemoryState s;
+
+public:
+
+	static void Initialize()
+	{
+		size_t allocNeeded = maxBuffers * sizeof(ArenaId) + ArenaManager::c_guardPageSize * 2;
+		size_t allocSize = (allocNeeded / ArenaManager::c_bufferReserveSize + 1)
+			* ArenaManager::c_bufferReserveSize;
+
+		auto virtualBase = (size_t)ClrVirtualAlloc(
+			(LPVOID)ArenaManager::c_arenaBaseAddress,
+			ArenaManager::c_arenaBaseAddress/*arenaBaseSize*/,
+			MEM_RESERVE, PAGE_NOACCESS);
+
+		if ((size_t)virtualBase != ArenaManager::c_arenaBaseAddress)
+		{
+			printf("failed to initialize virtual memory for arenas");
+			MemoryException();
+		}
+
+
+		LPVOID addr = ClrVirtualAlloc((LPVOID)virtualBase, allocSize - ArenaManager::c_guardPageSize, MEM_COMMIT, PAGE_READWRITE);
+		if (addr == 0)
+		{
+			int err = GetLastError();
+			printf("error %d\n", err);
+		}
+		if ((size_t)addr != ArenaManager::c_arenaBaseAddress)
+		{
+			printf("failed to initialize virtual memory for arenas");
+			MemoryException();
+		}
+
+		s.m_nextSlot = ArenaManager::c_bufferReserveSize / ArenaManager::c_bufferSize;
+		s.m_startSlot = s.m_nextSlot;
+		s.m_circleNextSlot = s.m_nextSlot;
+		s.m_numberOfRecycleBuffers = 0;
+	}
+
+private:
+	static BufferId Slots(size_t len)
+	{
+		return (BufferId)((len + ArenaManager::c_guardPageSize - 1) / ArenaManager::c_bufferReserveSize + 1);
+	}
+
+	static void SpinLock(LONG& lock)
+	{
+		while (0 != InterlockedCompareExchange(&lock, 1, 0));
+	}
+
+	static void SpinUnlock(LONG& lock)
+	{
+		while (1 != InterlockedCompareExchange(&lock, 0, 1));
+	}
+
+	static void *BufferIdToAddress(BufferId id)
+	{
+		return  (void*)(ArenaManager::c_arenaBaseAddress + id * ArenaManager::c_bufferReserveSize);
+	}
+
+	static BufferId BufferAddressToId(void *addr)
+	{
+		return (BufferId)(((size_t)addr - ArenaManager::c_arenaBaseAddress) / ArenaManager::c_bufferReserveSize);
+	}
+
+public:
+	static bool IsArena(void *addr)
+	{
+		return (((size_t)addr >> (ArenaManager::c_addressBits - 1)) == 1);
+	}
+
+	static ArenaId GetArenaId(void *addr)
+	{
+		if (!IsArena(addr)) return -1;
+		BufferId bid = BufferAddressToId(addr);
+		return ARENALOOKUP(bid);
+	}
+
+	static bool IsSameArenaAddress(void *p0, void *p1)
+	{
+		if (!IsArena(p0)) return false;
+		if (!IsArena(p1)) return false;
+		BufferId bid0 = BufferAddressToId(p0);
+		ArenaId aid0 = ARENALOOKUP(bid0);
+		BufferId bid1 = BufferAddressToId(p1);
+		ArenaId aid1 = ARENALOOKUP(bid1);
+		return aid0 == aid1;
+	}
+
+	__declspec(noinline)
+	static void FreeBuffer(void *addr, size_t len = ArenaManager::c_bufferSize)
+	{
+		if (len == ArenaManager::c_bufferSize && s.m_numberOfRecycleBuffers < ArenaManager::c_maxRecycleBuffers)
+		{
+			BufferId first = BufferAddressToId(addr);
+
+			ARENALOOKUP(first) = recycled;
+			InterlockedIncrement(&s.m_numberOfRecycleBuffers);
+		}
+		else {
+			ClrVirtualFree(addr, len, MEM_DECOMMIT);
+			BufferId first = BufferAddressToId(addr);
+			int slots = Slots(len);
+			for (BufferId i = first; i < first + slots; i++)
+			{
+				ARENALOOKUP(i) = empty;
+			}
+		}
+	}
+
+	__declspec(noinline)
+		static void *GetBuffer(ArenaId arenaId, size_t len = ArenaManager::c_bufferSize)
+	{
+		assert(arenaId != empty && arenaId != recycled);
+		SpinLock(s.m_bufferTableLock);
+		BufferId bufferId = 0;
+		BufferId backupId = 0;
+		void *ret = nullptr;
+
+		if (len == ArenaManager::c_bufferSize)
+		{
+			int cnt = s.m_nextSlot - s.m_startSlot;
+			for (BufferId i = s.m_circleNextSlot; --cnt >= 0 && ret == nullptr; i = (i == s.m_nextSlot - 1) ? s.m_startSlot : i + 1)
+			{
+				if (ARENALOOKUP(i) == recycled)
+				{
+					bufferId = i;
+					ret = BufferIdToAddress(bufferId);
+					InterlockedDecrement(&s.m_numberOfRecycleBuffers);
+				}
+				else if (ARENALOOKUP(i) == empty)
+				{
+					backupId = i;
+					if (s.m_numberOfRecycleBuffers == 0) break;
+				}
+			}
+		}
+
+
+		if (ret) {
+			ARENALOOKUP(bufferId) = arenaId;
+			SpinUnlock(s.m_bufferTableLock);
+			return ret;
+		}
+
+		if (backupId == 0)
+		{
+			bufferId = s.m_nextSlot;
+			s.m_nextSlot += Slots(len);
+			if (s.m_nextSlot > maxBuffers)
+			{
+				MemoryException();
+			}
+		}
+		else
+		{
+			bufferId = backupId;
+		}
+
+		for (int i = bufferId; i < bufferId + Slots(len); i++)
+			ARENALOOKUP(i) = arenaId;
+		ret = BufferIdToAddress(bufferId);
+		SpinUnlock(s.m_bufferTableLock);
+
+		LPVOID addr = ClrVirtualAlloc(ret, len, MEM_COMMIT, PAGE_READWRITE);
+
+		if (addr != ret)
+		{
+			printf("failed to initialize virtual memory for arenas");
+			MemoryException();
+		}
+
+		return ret;
+	}
+
+private:
+	static void MemoryException()
+	{
+		EEPOLICY_HANDLE_FATAL_ERROR(COR_E_OUTOFMEMORY);
+
+	}
+};
+
+ArenaVirtualMemoryState ArenaVirtualMemory::s;
 
 ////////////////////////////////////////////////////////
 // Arena is the class that holds each arena allocator.
@@ -698,6 +925,8 @@ private:
 
 	// A cache of all marshaled objects
 	ArenaHashtable m_cache;
+
+	ArenaVector<Object*> m_finalizationQueue;
 
 public:
 	static Arena *MakeArena(ArenaId id, size_t requestAddress, size_t bufferSize, size_t maxPerArena)
@@ -795,16 +1024,52 @@ public:
 		arenaThread->SetBuffer(next, next + m_bufferSize);
 	}
 
+	void CallFinalizer(Object* obj)
+	{
+		MethodTable     *pMT = obj->GetMethodTable();
+
+		// if we don't have a class, we can't call the finalizer
+		// if the object has been marked run as finalizer run don't call either
+		if (pMT)
+		{
+			if (!((obj->GetHeader()->GetBits()) & BIT_SBLK_FINALIZER_RUN))
+			{
+				_ASSERTE(obj->GetMethodTable() == pMT);
+				_ASSERTE(pMT->HasFinalizer() || pMT->IsTransparentProxy());
+
+				MethodTable::CallFinalizer(obj);
+			}
+			else
+			{
+				//reset the bit so the object can be put on the list 
+				//with RegisterForFinalization
+				obj->GetHeader()->ClrBit(BIT_SBLK_FINALIZER_RUN);
+			}
+		}
+
+		GCHeap::GetGCHeap()->SetFinalizationRun(obj);
+	}
+
 	void Destroy()
 	{
+		GCX_COOP();
+		for (int i = 0; i < m_finalizationQueue.Size(); i++)
+		{
+			Object* o = m_finalizationQueue[i];
+			CallFinalizer(o);
+		}
+
 		for (int i = m_bufferNext - 1; i >= 0; i--)
 		{
 			auto addr = m_buffers[i].m_addr;
 			auto len = m_buffers[i].m_len;
-			ClrVirtualFree(addr, len, MEM_DECOMMIT);
-			::ArenaManager::Log("VirtualFree", (size_t)addr, len);
-
+			ArenaVirtualMemory::FreeBuffer(addr, len);
 		}
+	}
+
+	void RegisterForFinalization(Object* o, size_t size)
+	{
+		m_finalizationQueue.PushBack(o);
 	}
 
 	void AddCache(Object* src, Object* copy)
@@ -837,6 +1102,11 @@ public:
 	}
 };
 
+void ArenaThread::RegisterForFinalization(Object* o, size_t size)
+{
+	m_arena->RegisterForFinalization(o, size);
+}
+
 void *ArenaThread::Allocate(size_t size)
 {
 	for (;;)
@@ -863,227 +1133,6 @@ void *ArenaThread::Allocate(size_t size)
 		}
 	}
 }
-
-
-//////////////////////////////////////////////
-// ArenaVirtualMemory
-//
-//////////////////////////////////////////////
-
-
-// This struct represents the global variables used by ArenaVirtualMemory
-struct ArenaVirtualMemoryState
-{
-	// The next unused slot in the buffer table
-	BufferId m_nextSlot;
-
-	// This first slot in the buffer table
-	BufferId m_startSlot;
-
-	// The last location probed for empties in the buffer table
-	BufferId m_circleNextSlot;
-
-	// Lock for buffer table
-	LONG m_bufferTableLock;
-};
-
-// reads from the buffer table
-#define ARENALOOKUP(x) (((ArenaId*)ArenaManager::c_arenaBaseAddress)[x])
-
-class ArenaVirtualMemory
-{
-public:
-
-private:
-	static const size_t maxBuffers = ArenaManager::c_arenaBaseSize / ArenaManager::c_bufferReserveSize;
-	static const ArenaId available = (ArenaId)-1;
-	static const ArenaId empty = (ArenaId)-2;
-
-
-	static ArenaVirtualMemoryState s;
-
-public:
-
-	static void Initialize()
-	{
-		size_t allocNeeded = maxBuffers * sizeof(ArenaId) + ArenaManager::c_guardPageSize * 2;
-		size_t allocSize = (allocNeeded / ArenaManager::c_bufferReserveSize + 1)
-			* ArenaManager::c_bufferReserveSize;
-
-		auto virtualBase = (size_t)ClrVirtualAlloc(
-			(LPVOID)ArenaManager::c_arenaBaseAddress,
-			ArenaManager::c_arenaBaseAddress/*arenaBaseSize*/,
-			MEM_RESERVE, PAGE_NOACCESS);
-
-		if ((size_t)virtualBase != ArenaManager::c_arenaBaseAddress)
-		{
-			printf("failed to initialize virtual memory for arenas");
-			MemoryException();
-		}
-
-
-		LPVOID addr = ClrVirtualAlloc((LPVOID)virtualBase, allocSize - ArenaManager::c_guardPageSize, MEM_COMMIT, PAGE_READWRITE);
-		if (addr == 0)
-		{
-			int err = GetLastError();
-			printf("error %d\n", err);
-		}
-		if ((size_t)addr != ArenaManager::c_arenaBaseAddress)
-		{
-			printf("failed to initialize virtual memory for arenas");
-			MemoryException();
-		}
-
-		s.m_nextSlot = ArenaManager::c_bufferReserveSize / ArenaManager::c_bufferSize;
-		s.m_startSlot = s.m_nextSlot;
-		s.m_circleNextSlot = s.m_nextSlot;
-	}
-
-private:
-	static BufferId Slots(size_t len)
-	{
-		return (BufferId)((len + ArenaManager::c_guardPageSize - 1) / ArenaManager::c_bufferReserveSize + 1);
-	}
-
-	static void SpinLock(LONG& lock)
-	{
-		while (0 != InterlockedCompareExchange(&lock, 1, 0));
-	}
-
-	static void SpinUnlock(LONG& lock)
-	{
-		while (1 != InterlockedCompareExchange(&lock, 0, 1));
-	}
-
-	static void *BufferIdToAddress(BufferId id)
-	{
-		return  (void*)(ArenaManager::c_arenaBaseAddress + id * ArenaManager::c_bufferReserveSize);
-	}
-
-	static BufferId BufferAddressToId(void *addr)
-	{
-		return (BufferId)(((size_t)addr - ArenaManager::c_arenaBaseAddress) / ArenaManager::c_bufferReserveSize);
-	}
-
-public:
-	static bool IsArena(void *addr)
-	{
-		return (((size_t)addr >> (ArenaManager::c_addressBits - 1)) == 1);
-	}
-
-	static ArenaId GetArenaId(void *addr)
-	{
-		if (!IsArena(addr)) return -1;
-		BufferId bid = BufferAddressToId(addr);
-		return ARENALOOKUP(bid);
-	}
-
-	static bool IsSameArenaAddress(void *p0, void *p1)
-	{
-		if (!IsArena(p0)) return false;
-		if (!IsArena(p1)) return false;
-		BufferId bid0 = BufferAddressToId(p0);
-		ArenaId aid0 = ARENALOOKUP(bid0);
-		BufferId bid1 = BufferAddressToId(p1);
-		ArenaId aid1 = ARENALOOKUP(bid1);
-		return aid0 == aid1;
-	}
-
-	static void FreeBuffer(void *addr, size_t len = ArenaManager::c_bufferSize)
-	{
-		if (len == ArenaManager::c_bufferSize)
-		{
-			BufferId first = BufferAddressToId(addr);
-			int slots = Slots(len);
-			for (BufferId i = first; i < first + slots; i++)
-			{
-				ARENALOOKUP(i) = available;
-			}
-		}
-		else {
-			ClrVirtualFree(addr, len, MEM_DECOMMIT);
-			BufferId first = BufferAddressToId(addr);
-			int slots = Slots(len);
-			for (BufferId i = first; i < first + slots; i++)
-			{
-				ARENALOOKUP(i) = empty;
-			}
-		}
-	}
-
-	__declspec(noinline)
-		static void *GetBuffer(ArenaId arenaId, size_t len = ArenaManager::c_bufferSize)
-	{
-		assert(arenaId != empty && arenaId != available);
-		SpinLock(s.m_bufferTableLock);
-		BufferId bufferId = 0;
-		BufferId backupId = 0;
-		void *ret = nullptr;
-
-		if (len == ArenaManager::c_bufferSize)
-		{
-			int cnt = s.m_nextSlot - s.m_startSlot;
-			for (BufferId i = s.m_circleNextSlot; --cnt >= 0 && ret == nullptr; i = (i == s.m_nextSlot - 1) ? s.m_startSlot : i + 1)
-			{
-				if (ARENALOOKUP(i) == available)
-				{
-					bufferId = i;
-					ret = BufferIdToAddress(bufferId);
-				}
-				else if (ARENALOOKUP(i) == empty)
-				{
-					backupId = i;
-				}
-			}
-		}
-
-
-		if (ret) {
-			ARENALOOKUP(bufferId) = arenaId;
-			SpinUnlock(s.m_bufferTableLock);
-			return ret;
-		}
-
-		if (backupId == 0)
-		{
-			bufferId = s.m_nextSlot;
-			s.m_nextSlot += Slots(len);
-			if (s.m_nextSlot > maxBuffers)
-			{
-				MemoryException();
-			}
-		}
-		else
-		{
-			bufferId = backupId;
-		}
-
-		for (int i = bufferId; i < bufferId + Slots(len); i++)
-			ARENALOOKUP(i) = arenaId;
-		ret = BufferIdToAddress(bufferId);
-		SpinUnlock(s.m_bufferTableLock);
-
-		LPVOID addr = ClrVirtualAlloc(ret, len, MEM_COMMIT, PAGE_READWRITE);
-
-		if (addr != ret)
-		{
-			printf("failed to initialize virtual memory for arenas");
-			MemoryException();
-		}
-
-		return ret;
-	}
-
-private:
-	static void MemoryException()
-	{
-		EEPOLICY_HANDLE_FATAL_ERROR(COR_E_OUTOFMEMORY);
-
-	}
-};
-
-ArenaVirtualMemoryState ArenaVirtualMemory::s;
-
 
 
 //////////////////////////////////////////////
@@ -1294,10 +1343,6 @@ inline void *ArenaManager::Peek()
 	return (arena)->Allocate(0);
 }
 
-void  ArenaManager::RegisterForFinalization(Object* o, size_t size)
-{
-	Log("RegisterForFinalization", (size_t)o, (size_t)size);
-}
 
 void *ArenaManager::Allocate(size_t jsize, uint32_t flags)
 {
@@ -1308,20 +1353,17 @@ void *ArenaManager::Allocate(size_t jsize, uint32_t flags)
 	}
 
 	size_t size = Align(jsize);
-	void* ret = (arena)->Allocate(size);
+	void* ret = arena->Allocate(size);
 	MemClear(ret, size);
 	if (flags & GC_ALLOC_FINALIZE)
 	{
-		RegisterForFinalization((Object*)ret, size);
+		arena->RegisterForFinalization((Object*)ret, size);
 	}
 
-#ifdef DEBUG
 #if defined(BIT64)
 	assert ((((size_t)ret) & 7) == 0);
 #else
 	assert((((size_t)ret) & 3) == 0);
-#endif
-	Log("allocate", (size_t)ret, size);
 #endif
 
 	return (void*)((char*)ret);
@@ -1506,18 +1548,25 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 
 	if (isrc == nullptr) return;
 	Thread *thread = GetThread();
+	void* errorSource = nullptr;
 
 	ArenaVector<MarshalRequest> queue;
+#ifdef _DEBUG
+rerunMarshal :
+	ArenaVector<MarshalRequest> verifyList;
+#endif
 	queue.PushBack(MarshalRequest((Object*)isrc, (Object**)idst));
 
 	while (!queue.IsEmpty())
 	{
 		MarshalRequest request = queue.PopFront();
 		queue.DeleteRepeat(request);
-
 		Object *src = request.src;
 		Object **dst = request.dst;
-
+		if (src == errorSource)
+		{
+			src = (Object*)errorSource;
+		}
 		MethodTable *pMT = request.pMT == nullptr ? src->GetMethodTable() : request.pMT;
 
 		// valueTypeSize is nonzero only for structs within either classes or arrays
@@ -1530,6 +1579,7 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 		size = ROUNDSIZE(size);
 
 #ifdef ARENA_LOGGING
+
 		PushGC(thread);
 		DefineFullyQualifiedNameForClass();
 		char* name = (char*)GetFullyQualifiedNameForClass(pMT);
@@ -1544,17 +1594,29 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 		Arena *arenaAllocator = (dstAllocator == nullptr) ? srcAllocator : ((srcAllocator == nullptr) ? dstAllocator : nullptr);
 
 		Object* clone = nullptr;
-		bool cloneIsFromCache = false;
+		bool suppressCacheWrite = false;
 
-		// check cache
-		if (arenaAllocator != nullptr)
+		if (pMT->IsMarshaledByRef())
 		{
-			clone = arenaAllocator->CheckCache(src);
+			clone = src;
+			suppressCacheWrite = true;  
+#ifdef ARENA_LOGGING
+			Log("Marshal By Ref", (size_t)src, (size_t)idst,name);
+#endif // ARENA_LOGGING
+
+		} 
+		else if (arenaAllocator != nullptr)
+		{
+			if (errorSource == nullptr)
+			{
+				clone = arenaAllocator->CheckCache(src);
+			}
+
 			if (clone)
 			{
-				cloneIsFromCache = true;
+				suppressCacheWrite = true;
 #ifdef ARENA_LOGGING
-				Log("cached clone", (size_t)src, (size_t)clone, "", (size_t)idst);
+				Log("cached clone", (size_t)src, (size_t)clone, name, (size_t)idst);
 #endif // ARENA_LOGGING
 			}
 		}
@@ -1589,22 +1651,12 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 
 			if (pMT == g_pStringClass)
 			{
-				size_t* csrc = (size_t*)src;
-				size_t* srcEnd = (size_t*)((char*)src + size);
-				size_t* cdst = (size_t*)clone;
-				while (csrc < srcEnd) *cdst++ = *csrc++;
+				MemCopy(clone, src, size - ArenaManager::c_headerSize);
 			}
 			else if (pMT->IsArray())
 			{
-				// copy length word
-
-				int ioffset = pMT->GetBaseSize();
-#ifdef AMD64
-				ioffset -= 8;
-#else
-				ioffset -= 4;
-#endif // AMD64
-
+				// copy the base of the object (not the array content)
+				int ioffset = pMT->GetBaseSize() - ArenaManager::c_headerSize;
 				MemCopy(clone, src, ioffset);
 				TypeHandle arrayTypeHandle = ArrayBase::GetTypeHandle(pMT);
 				ArrayTypeDesc* ar = arrayTypeHandle.AsArray();
@@ -1664,10 +1716,7 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 					break;
 				default:
 				{
-					size_t* pSrc = (size_t*)src;
-					size_t* pSrcEnd = (size_t*)((char*)src + size);
-					size_t* pDst = (size_t*)clone;
-					for (; pSrc < pSrcEnd;) *pDst++ = *pSrc++;
+					MemCopy((char*)clone+ ioffset, (char*)src+ ioffset, ROUNDSIZE(numComponents*componentSize));
 				}
 				break;
 				}
@@ -1704,11 +1753,11 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 						if (f.IsStatic()) continue;
 						CorElementType type = f.GetFieldType();
 						size_t offset = f.GetOffset() + ioffset;
-						if (pSrcFields[i].IsNotSerialized())
-						{
-							Log("IsNotSerialized", offset);
-							continue;
-						}
+						//if (pSrcFields[i].IsNotSerialized()) <- this crashes, maybe because of me.
+						//{
+						//	Log("IsNotSerialized", offset);  
+						//	continue;
+						//}
 
 						if (offset >= cloneSize)
 						{
@@ -1771,7 +1820,7 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 							*pDst2 = *pSrc2;
 						}
 						break;
-
+						IN_WIN32(case ELEMENT_TYPE_I:)
 						case ELEMENT_TYPE_I4:
 						case ELEMENT_TYPE_U4:
 						case ELEMENT_TYPE_R4:
@@ -1786,6 +1835,7 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 							// pointers may be dangerous, but they are
 							// copied without chang
 
+						IN_WIN64(case ELEMENT_TYPE_I:)
 						case ELEMENT_TYPE_I8:
 						case ELEMENT_TYPE_U8:
 						case ELEMENT_TYPE_R8:
@@ -1805,8 +1855,8 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 					pCurrMT = pCurrMT->GetParentMethodTable();
 				}
 			}
-#ifdef ARENA_LOGGING
 
+#ifdef ARENA_LOGGING
 			Log("ArenaMarshal clone", (size_t)src, (size_t)clone, name, (size_t)dst);
 #endif // ARENA_LOGGING
 #ifdef VERIFYALLOC
@@ -1816,12 +1866,23 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 			}
 			VerifyAllArenaObjects();
 #endif // VERIFYALLOC
-			}
+		}
 
-		if (!cloneIsFromCache)
+#ifdef DEBUG
+		if (request.valueTypeSize==0)
+		{ 
+		verifyList.PushBack(
+			MarshalRequest(
+				(Object*)((char*)src),
+				(Object**)((char*)clone),
+				size,
+				nullptr));
+		}
+#endif
+
+		if (!suppressCacheWrite)
 		{
 			arenaAllocator->AddCache(src, clone);
-			arenaAllocator->AddCache(clone, src);
 		}
 
 		if (valueTypeSize == 0)
@@ -1837,6 +1898,42 @@ void ArenaManager::ArenaMarshal (void*idst, void*isrc)
 			}
 		}
 	}
+#ifdef _DEBUG
+	while (!verifyList.IsEmpty())
+	{
+		auto request = verifyList.PopFront();
+		size_t* pSrc = (size_t*)request.src;
+#if defined(BIT64)
+		size_t cnt = (request.valueTypeSize >> 3) - 1;
+#else
+		size_t cnt = (request.valueTypeSize >> 2) - 1;
+#endif
+
+		size_t* pDst = (size_t*)request.dst;
+		for (; --cnt; pSrc++, pDst++) if (*pDst != *pSrc)
+		{
+			bool sa = ISARENA((void*)*pSrc);
+			bool sb = ISARENA((void*)*pDst);
+			if (!sa && !sb)
+			{
+#ifdef ARENA_LOGGING
+				Log("validate clone error", (size_t)pSrc, (size_t)pDst);
+				pSrc = nullptr;
+				*pSrc = 0;
+				goto rerunMarshal;
+#else
+				printf("validation clone error %llx=%llx %llx=%llx\n", (size_t)pSrc, *(size_t*)pSrc, (size_t)pDst, *(size_t*)pDst);
+				errorSource = request.src;
+				goto rerunMarshal;
+				pSrc = nullptr;
+				*pSrc = 0;
+#endif
+				
+			}
+		}
+
+	}
+#endif
 }
 
 #ifdef VERIFYALLOC
@@ -1884,10 +1981,10 @@ void ArenaManager::VerifyClass(Object* o, MethodTable *pMT)
 	while (pCurrMT)
 	{
 		DWORD numInstanceFields = pCurrMT->GetNumInstanceFields();
-		if (numInstanceFields == 0) break;
+		if (numInstanceFields == 0) continue;
 
 		FieldDesc *pSrcFields = pCurrMT->GetApproxFieldDescListRaw();
-		if (pSrcFields == nullptr) break;
+		if (pSrcFields == nullptr) continue;
 
 		for (DWORD i = 0; i < numInstanceFields; i++)
 		{
@@ -1895,15 +1992,15 @@ void ArenaManager::VerifyClass(Object* o, MethodTable *pMT)
 			if (f.IsStatic()) continue;
 			CorElementType type = f.GetFieldType();
 			DWORD offset = f.GetOffset() + ioffset;
-			if (pSrcFields[i].IsNotSerialized())
-			{
-				Log("IsNotSerialized", offset);
-				continue;
-			}
-			if (offset >= (DWORD)classSize)
-			{ 
-				continue;
-			}
+			//if (pSrcFields[i].IsNotSerialized())
+			//{
+			//	Log("IsNotSerialized", offset);
+			//	continue;
+			//}
+			//if (offset >= (DWORD)classSize)
+			//{ 
+			//	continue;
+			//}
 
 #ifdef DEBUG
 			LPCUTF8 szFieldName = f.GetDebugName();

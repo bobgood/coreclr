@@ -34,6 +34,7 @@
 #include "fieldmarshaler.h"
 #include "cgensys.h"
 #include "gc.h"
+#include "arena.h"
 #include "security.h"
 #include "dbginterface.h"
 #include "comdelegate.h"
@@ -3267,7 +3268,9 @@ OBJECTREF MethodTable::AllocateStaticBox(MethodTable* pFieldMT, BOOL fPinned, OB
 	// Activate any dependent modules if necessary
 	pFieldMT->EnsureInstanceActive();
 
+	START_NOT_ARENA_SECTION  // Statics are never in arenas
 	OBJECTREF obj = AllocateObject(pFieldMT);
+	END_NOT_ARENA_SECTION
 
 	// Pin the object if necessary
 	if (fPinned)
@@ -3331,6 +3334,8 @@ BOOL MethodTable::RunClassInitEx(OBJECTREF *pThrowable)
 	// Call the code method without touching MethodDesc if possible
 	PCODE pCctorCode = pCanonMT->GetSlot(pCanonMT->GetClassConstructorSlot());
 
+	// Static variables are never allowed in arenas
+	START_NOT_ARENA_SECTION
 	if (pCanonMT->IsSharedByGenericInstantiations())
 	{
 		PREPARE_NONVIRTUAL_CALLSITE_USING_CODE(pCctorCode);
@@ -3346,6 +3351,7 @@ BOOL MethodTable::RunClassInitEx(OBJECTREF *pThrowable)
 		CATCH_HANDLER_FOUND_NOTIFICATION_CALLSITE;
 		CALL_MANAGED_METHOD_NORET(args);
 	}
+	END_NOT_ARENA_SECTION
 
 	STRESS_LOG1(LF_CLASSLOADER, LL_INFO100000, "RunClassInit: Returned Successfully from class contructor for type %pT\n", this);
 

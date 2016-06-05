@@ -7,7 +7,7 @@
 
 
 //#define VERIFYALLOC
-#define ARENA_LOGGING
+//#define ARENA_LOGGING
 
 typedef short ArenaId;
 typedef int BufferId;
@@ -90,8 +90,8 @@ public:
 	void *Pop()
 	{
 		DWORD written;
+		assert(m_size >= 0);
 		m_size--;
-		assert(m_size > 0);
 		if (m_size == 0)
 		{
 			m_current = nullptr;		
@@ -128,6 +128,11 @@ public:
 	static const size_t c_arenaRangeEnd = c_arenaBaseAddress + c_arenaBaseSize;
 
 	static const size_t c_bufferReserveSize = 1024 * 1024;
+#if defined(BIT64)
+	static const size_t c_headerSize = 8;
+#else
+	static const size_t c_headerSize = 4;
+#endif
 	
 	// guard page cannot be zero, because VirtualAlloc has difficulty
 	// putting buffers immediately ajacent, and we need virtual buffers
@@ -136,6 +141,9 @@ public:
 	static const size_t c_bufferSize = c_bufferReserveSize - c_guardPageSize;
 
 	static const int c_maxArenas = 4096;
+
+	// number of 1M buffers that will be used for recycling.
+	static const int c_maxRecycleBuffers = 100;
 private:
 	// Reservation system for all arenas.
 	static unsigned long m_refCount[c_maxArenas];
@@ -193,12 +201,12 @@ private:
 		size_t* dst = (size_t*)idst;
 		size_t* src = (size_t*)isrc;
 		int cnt = (int)(len >> 3);
-		while (cnt--)*dst = *src;
+		while (cnt--)*dst++ = *src++;
 #else
 		unsigned* dst = (unsigned*)idst;
 		unsigned* src = (unsigned*)isrc;
 		int cnt = (int)(len >> 2);
-		while (cnt--)*dst = *src;
+		while (cnt--)*dst++ = *src++;
 #endif
 	}
 
@@ -208,11 +216,11 @@ public:
 #if defined(BIT64)
 		size_t* dst = (size_t*)idst;
 		int cnt = (int)(len >> 3);
-		while (cnt--)*dst = 0;
+		while (cnt--)*dst++ = 0;
 #else
 		unsigned *dst = (unsigned*)idst;
 		int cnt = (int)(len >> 2);
-		while (cnt--)*dst = 0;
+		while (cnt--)*dst++ = 0;
 #endif
 	}
 
